@@ -185,7 +185,7 @@ const MenuManager: React.FC = () => {
   const [isManualInputModalOpen, setIsManualInputModalOpen] = useState(false);
 
   const extractItemsWithGemini = async (text: string, base64Image?: string): Promise<Partial<MenuItem>[]> => {
-    const apiKey = process.env.GEMINI_API_KEY || "";
+    const apiKey = process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
       console.error("GEMINI_API_KEY is not set.");
       toast.error("AI features require a configured GEMINI_API_KEY.");
