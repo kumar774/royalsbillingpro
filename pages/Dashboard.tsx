@@ -67,11 +67,22 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
   const activeRestaurant = restaurants.find(r => r.id === restaurantId);
 
   // --- Calculations for Overview ---
+  // --- Calculations for Overview ---
   const today = new Date().toDateString();
-  const getDailySales = (dateStr: string) => orders.filter(o => new Date(o.createdAt).toDateString() === dateStr).reduce((acc, o) => acc + o.total, 0);
-  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+  
+  // Sales & Revenue
+  const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today);
+  const todaySale = todayOrders.reduce((acc, o) => acc + o.total, 0);
   const totalRevenue = orders.reduce((acc, o) => acc + o.total, 0);
-  const todaySale = getDailySales(today);
+
+  // Expenses
+  const todayExpensesAmount = expenses
+    .filter(e => new Date(e.date).toDateString() === today) // Note: types.ts ke hisaab se e.date use hota hai
+    .reduce((acc, e) => acc + e.amount, 0);
+  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+
+  // Helper for Chart
+  const getDailySales = (dateStr: string) => orders.filter(o => new Date(o.createdAt).toDateString() === dateStr).reduce((acc, o) => acc + o.total, 0);
 
   // Weekly Trend Data
   const last7Days = [...Array(7)].map((_, i) => {
@@ -200,10 +211,11 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
 
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {/* Today's Sales Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-sm font-medium text-gray-500">Today&apos;s Sales</p>
+                                <p className="text-sm font-medium text-gray-500">Today's Sales</p>
                                 <h3 className="text-2xl font-bold text-gray-900 mt-1">₹{todaySale.toFixed(2)}</h3>
                             </div>
                             <div className="p-2 bg-green-50 rounded-lg">
@@ -211,10 +223,11 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                             </div>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-green-600">
-                            <span className="font-medium">Live updates</span>
+                            <span className="font-medium">Avg order: ₹{(todaySale / (todayOrders.length || 1)).toFixed(2)}</span>
                         </div>
                     </div>
 
+                    {/* Total Orders Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -225,9 +238,12 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                                 <ShoppingBag className="h-6 w-6 text-blue-600" />
                             </div>
                         </div>
-                        <div className="mt-4 text-xs text-gray-400">Lifetime orders</div>
+                        <div className="mt-4 text-xs font-medium text-blue-600">
+                            Today: {todayOrders.length} orders
+                        </div>
                     </div>
 
+                    {/* Total Revenue Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -238,8 +254,12 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                                 <PieChart className="h-6 w-6 text-orange-600" />
                             </div>
                         </div>
+                        <div className="mt-4 text-xs font-medium text-orange-600">
+                            Today: ₹{todaySale.toFixed(2)}
+                        </div>
                     </div>
 
+                    {/* Total Expenses Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -249,6 +269,9 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                             <div className="p-2 bg-red-50 rounded-lg">
                                 <Wallet className="h-6 w-6 text-red-600" />
                             </div>
+                        </div>
+                        <div className="mt-4 text-xs font-medium text-red-600">
+                            Today: ₹{todayExpensesAmount.toFixed(2)}
                         </div>
                     </div>
                 </div>
