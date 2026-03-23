@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { UtensilsCrossed, LayoutDashboard, Menu, Settings as SettingsIcon, LogOut, ExternalLink, Calculator, ShoppingBag, TrendingUp, PieChart, FileText, Wallet, Store, ChevronDown, PlusCircle } from 'lucide-react';
+import { UtensilsCrossed, LayoutDashboard, Menu, Settings as SettingsIcon, LogOut, ExternalLink, Calculator, ShoppingBag, TrendingUp, PieChart, FileText, Wallet, Store, Mail, Key, RefreshCcw, X } from 'lucide-react';
 import { auth, db } from '../firebase/config';
+import { updateEmail, updatePassword, sendPasswordResetEmail } from 'firebase/auth';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { toast } from 'react-hot-toast';
 import { Order, Expense } from '../types';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RePie, Pie, Cell, Legend } from 'recharts';
 import MenuManager from './MenuManager';
@@ -26,6 +28,14 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
   const navigate = useNavigate();
   const { restaurants } = useRestaurants();
 
+  // Profile Menu State
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const profileRef = useRef<HTMLDivElement>(null);
+
   // Analytics State
   const [orders, setOrders] = useState<Order[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -47,8 +57,60 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
     return () => { unsubOrders(); unsubExpenses(); };
   }, [restaurantId, view]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handleSignOut = () => {
     auth.signOut().then(() => navigate('/login'));
+  };
+
+  const handleForgetPassword = async () => {
+    if (!auth.currentUser?.email) return;
+    try {
+      await sendPasswordResetEmail(auth, auth.currentUser.email);
+      toast.success('Password reset email sent!');
+      setIsProfileOpen(false);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send reset email';
+      toast.error(errorMessage);
+    }
+  };
+
+  const handleChangeEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    const toastId = toast.loading('Updating email...');
+    try {
+      await updateEmail(auth.currentUser, newEmail);
+      toast.success('Email updated successfully!', { id: toastId });
+      setShowEmailModal(false);
+      setNewEmail('');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update email. You may need to re-authenticate.';
+      toast.error(errorMessage, { id: toastId });
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    const toastId = toast.loading('Updating password...');
+    try {
+      await updatePassword(auth.currentUser, newPassword);
+      toast.success('Password updated successfully!', { id: toastId });
+      setShowPasswordModal(false);
+      setNewPassword('');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update password. You may need to re-authenticate.';
+      toast.error(errorMessage, { id: toastId });
+    }
   };
 
   const NavItem = ({ to, icon: Icon, label, active }: { to: string, icon: React.ElementType, label: string, active: boolean }) => (
@@ -67,22 +129,15 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
   const activeRestaurant = restaurants.find(r => r.id === restaurantId);
 
   // --- Calculations for Overview ---
-  // --- Calculations for Overview ---
   const today = new Date().toDateString();
-  
-  // Sales & Revenue
-  const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today);
-  const todaySale = todayOrders.reduce((acc, o) => acc + o.total, 0);
-  const totalRevenue = orders.reduce((acc, o) => acc + o.total, 0);
-
-  // Expenses
-  const todayExpensesAmount = expenses
-    .filter(e => new Date(e.date).toDateString() === today) // Note: types.ts ke hisaab se e.date use hota hai
-    .reduce((acc, e) => acc + e.amount, 0);
-  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
-
-  // Helper for Chart
   const getDailySales = (dateStr: string) => orders.filter(o => new Date(o.createdAt).toDateString() === dateStr).reduce((acc, o) => acc + o.total, 0);
+  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const totalRevenue = orders.reduce((acc, o) => acc + o.total, 0);
+  const todaySale = getDailySales(today);
+  
+  const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today);
+  const todayExpenses = expenses.filter(e => new Date(e.date).toDateString() === today).reduce((acc, e) => acc + e.amount, 0);
+  const todayAvgOrderValue = todayOrders.length > 0 ? todaySale / todayOrders.length : 0;
 
   // Weekly Trend Data
   const last7Days = [...Array(7)].map((_, i) => {
@@ -147,58 +202,164 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
         <header className="bg-white shadow-sm h-16 flex items-center px-8 justify-between z-10 print:hidden">
-           {/* Restaurant Switcher */}
-           <div className="flex items-center space-x-4">
-             <div className="relative group">
-               <button className="flex items-center space-x-3 hover:bg-gray-50 p-2 rounded-lg transition border border-transparent hover:border-gray-200">
-                  <div className="h-8 w-8 rounded-full overflow-hidden bg-gray-100 border border-gray-200">
-                     {activeRestaurant?.logo ? (
-                       <img src={activeRestaurant.logo} alt="Logo" className="h-full w-full object-cover" />
-                     ) : (
-                       <Store className="h-5 w-5 m-1.5 text-gray-400" />
-                     )}
-                  </div>
-                  <div className="text-left">
-                     <p className="text-sm font-bold text-gray-900 leading-none">{activeRestaurant?.name || 'Select Restaurant'}</p>
-                     <p className="text-xs text-gray-500 mt-0.5">ID: {restaurantId?.substring(0,8)}...</p>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
-               </button>
-
-               {/* Dropdown Menu */}
-               <div className="absolute top-full left-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-gray-100 py-2 hidden group-hover:block animate-fade-in z-50">
-                  <div className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Switch Restaurant</div>
-                  {restaurants.map(r => (
+           {/* Restaurant Switcher - Horizontal List */}
+           <div className="flex items-center overflow-x-auto no-scrollbar max-w-[60%]">
+              <div className="flex items-center space-x-6 whitespace-nowrap">
+                {restaurants.map((r, index) => (
+                  <React.Fragment key={r.id}>
                     <button 
-                      key={r.id}
                       onClick={() => navigate(`/dashboard/${r.id}`)}
-                      className={`w-full text-left px-4 py-3 flex items-center space-x-3 hover:bg-gray-50 transition ${r.id === restaurantId ? 'bg-orange-50' : ''}`}
+                      className={`text-sm transition-colors ${r.id === restaurantId ? 'font-bold text-orange-600' : 'text-gray-500 hover:text-gray-900 font-medium'}`}
                     >
-                      <img src={r.logo} className="h-6 w-6 rounded-full bg-gray-200 object-cover" alt="" />
-                      <span className={`text-sm font-medium ${r.id === restaurantId ? 'text-orange-700' : 'text-gray-700'}`}>{r.name}</span>
+                      {r.name}
                     </button>
-                  ))}
-                  <div className="border-t border-gray-100 mt-2 pt-2 px-2">
-                     <button 
-                       onClick={() => navigate(`/dashboard/${restaurantId}/restaurants/new`)}
-                       className="w-full flex items-center justify-center space-x-2 bg-gray-900 text-white py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition"
-                     >
-                       <PlusCircle className="h-4 w-4" /> <span>Add New Restaurant</span>
-                     </button>
-                  </div>
-               </div>
-             </div>
+                    {index < restaurants.length - 1 && (
+                      <span className="text-gray-300">|</span>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
            </div>
 
-           <div className="flex items-center space-x-4">
-              <Link to={`/restaurant/${activeRestaurant?.slug}`} target="_blank" className="text-sm text-orange-600 hover:underline flex items-center">
+           <div className="flex items-center space-x-6">
+              <Link to={`/restaurant/${activeRestaurant?.slug}`} target="_blank" className="text-sm text-orange-600 hover:underline flex items-center font-medium">
                  View Live Page <ExternalLink className="h-3 w-3 ml-1" />
               </Link>
-              <div className="h-8 w-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-xs">
-                AD
+              
+              {/* Profile Menu */}
+              <div className="relative" ref={profileRef}>
+                <button 
+                  onClick={() => setIsProfileOpen(!isProfileOpen)}
+                  className="h-9 w-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-sm hover:bg-orange-200 transition-colors border-2 border-white shadow-sm"
+                >
+                  {auth.currentUser?.email?.substring(0, 2).toUpperCase() || 'AD'}
+                </button>
+
+                {isProfileOpen && (
+                  <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-fade-in">
+                    <div className="px-4 py-2 border-b border-gray-50 mb-1">
+                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Account Settings</p>
+                      <p className="text-sm font-medium text-gray-700 truncate">{auth.currentUser?.email}</p>
+                    </div>
+                    <button 
+                      onClick={() => { setShowEmailModal(true); setIsProfileOpen(false); }}
+                      className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-gray-50 transition text-gray-600 text-sm"
+                    >
+                      <Mail className="h-4 w-4 text-gray-400" />
+                      <span>Change Email</span>
+                    </button>
+                    <button 
+                      onClick={() => { setShowPasswordModal(true); setIsProfileOpen(false); }}
+                      className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-gray-50 transition text-gray-600 text-sm"
+                    >
+                      <Key className="h-4 w-4 text-gray-400" />
+                      <span>Change Password</span>
+                    </button>
+                    <button 
+                      onClick={handleForgetPassword}
+                      className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-gray-50 transition text-gray-600 text-sm"
+                    >
+                      <RefreshCcw className="h-4 w-4 text-gray-400" />
+                      <span>Forget Password</span>
+                    </button>
+                    <div className="border-t border-gray-50 mt-1 pt-1">
+                      <button 
+                        onClick={handleSignOut}
+                        className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-red-50 transition text-red-600 text-sm"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Sign Out</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
            </div>
         </header>
+
+        {/* Modals */}
+        {showEmailModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 className="text-lg font-bold text-gray-900">Change Email</h3>
+                <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleChangeEmail} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">New Email Address</label>
+                  <input 
+                    type="email" 
+                    required
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                    placeholder="Enter new email"
+                  />
+                </div>
+                <div className="flex space-x-3 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setShowEmailModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium shadow-sm"
+                  >
+                    Update Email
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {showPasswordModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-scale-in">
+              <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 className="text-lg font-bold text-gray-900">Change Password</h3>
+                <button onClick={() => setShowPasswordModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleChangePassword} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                  <input 
+                    type="password" 
+                    required
+                    minLength={6}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                    placeholder="Enter new password"
+                  />
+                </div>
+                <div className="flex space-x-3 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => setShowPasswordModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium shadow-sm"
+                  >
+                    Update Password
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Scrollable Area */}
         <main className="flex-1 overflow-auto p-4 md:p-8 bg-gray-50">
@@ -211,11 +372,10 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
 
                 {/* Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                    {/* Today's Sales Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-sm font-medium text-gray-500">Today's Sales</p>
+                                <p className="text-sm font-medium text-gray-500">Today&apos;s Sales</p>
                                 <h3 className="text-2xl font-bold text-gray-900 mt-1">₹{todaySale.toFixed(2)}</h3>
                             </div>
                             <div className="p-2 bg-green-50 rounded-lg">
@@ -223,11 +383,10 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                             </div>
                         </div>
                         <div className="mt-4 flex items-center text-xs text-green-600">
-                            <span className="font-medium">Avg order: ₹{(todaySale / (todayOrders.length || 1)).toFixed(2)}</span>
+                            <span className="font-medium">Avg: ₹{todayAvgOrderValue.toFixed(2)}</span>
                         </div>
                     </div>
 
-                    {/* Total Orders Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -238,12 +397,16 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                                 <ShoppingBag className="h-6 w-6 text-blue-600" />
                             </div>
                         </div>
-                        <div className="mt-4 text-xs font-medium text-blue-600">
+                        <div className="mt-4 text-xs">
+                          <Link 
+                            to={`/dashboard/${restaurantId}/orders?filter=Today`} 
+                            className="text-blue-600 hover:underline font-medium"
+                          >
                             Today: {todayOrders.length} orders
+                          </Link>
                         </div>
                     </div>
 
-                    {/* Total Revenue Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -254,12 +417,11 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                                 <PieChart className="h-6 w-6 text-orange-600" />
                             </div>
                         </div>
-                        <div className="mt-4 text-xs font-medium text-orange-600">
-                            Today: ₹{todaySale.toFixed(2)}
+                        <div className="mt-4 text-xs text-orange-600 font-medium">
+                          Today: ₹{todaySale.toFixed(2)}
                         </div>
                     </div>
 
-                    {/* Total Expenses Card */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
                         <div className="flex justify-between items-start">
                             <div>
@@ -270,8 +432,8 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                                 <Wallet className="h-6 w-6 text-red-600" />
                             </div>
                         </div>
-                        <div className="mt-4 text-xs font-medium text-red-600">
-                            Today: ₹{todayExpensesAmount.toFixed(2)}
+                        <div className="mt-4 text-xs text-red-600 font-medium">
+                          Today: ₹{todayExpenses.toFixed(2)}
                         </div>
                     </div>
                 </div>
