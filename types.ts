@@ -213,6 +213,11 @@ export interface LastOrderDetails {
   restaurantId?: string;
 }
 
+export interface ExpenseItem {
+  name: string;
+  amount: number;
+}
+
 export interface Expense {
   id: string;
   title: string;
@@ -220,4 +225,6 @@ export interface Expense {
   category: string;
   date: string;
   note?: string;
+  isItemized?: boolean;
+  items?: ExpenseItem[];
 }
