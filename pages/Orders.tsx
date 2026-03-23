@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, updateDoc, doc, query, deleteDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Order, OrderStatus, Restaurant } from '../types';
@@ -10,8 +10,17 @@ import { sendTelegramMessage } from '../services/telegramService';
 
 const Orders: React.FC = () => {
   const { restaurantId } = useParams<{ restaurantId: string }>();
+  const [searchParams] = useSearchParams();
+  const initialFilter = searchParams.get('filter') as OrderStatus | 'All' | 'Today' | null;
+  
   const [orders, setOrders] = useState<Order[]>([]);
-  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'All'>('All');
+  const [filterStatus, setFilterStatus] = useState<OrderStatus | 'All' | 'Today'>(initialFilter || 'All');
+
+  useEffect(() => {
+    if (initialFilter) {
+      setFilterStatus(initialFilter);
+    }
+  }, [initialFilter]);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [restaurantData, setRestaurantData] = useState<Restaurant | null>(null);
@@ -150,13 +159,20 @@ const Orders: React.FC = () => {
   };
 
   const filteredOrders = orders.filter(o => {
-    const matchesStatus = filterStatus === 'All' || o.status === filterStatus;
+    const matchesStatus = filterStatus === 'All' || filterStatus === 'Today' || o.status === filterStatus;
     const matchesSearch = (
       o.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       o.customerPhone?.includes(searchTerm)
     );
     
     const orderDate = new Date(o.createdAt);
+
+    let matchesToday = true;
+    if (filterStatus === 'Today') {
+        const today = new Date();
+        matchesToday = orderDate.toDateString() === today.toDateString();
+    }
+
     let matchesStart = true;
     if (startDate) {
         const start = new Date(startDate);
@@ -170,7 +186,7 @@ const Orders: React.FC = () => {
         matchesEnd = orderDate <= end;
     }
 
-    return matchesStatus && matchesStart && matchesEnd && matchesSearch;
+    return matchesStatus && matchesToday && matchesStart && matchesEnd && matchesSearch;
   });
 
   const getStatusColor = (status: OrderStatus) => {
@@ -346,10 +362,10 @@ const Orders: React.FC = () => {
 
               {/* Status Tabs */}
               <div className="flex p-1 bg-gray-100 rounded-lg overflow-x-auto no-scrollbar">
-              {['All', 'Pending', 'Preparing', 'Ready', 'Completed', 'Cancelled'].map((status) => (
+              {['All', 'Today', 'Pending', 'Preparing', 'Ready', 'Completed', 'Cancelled'].map((status) => (
                   <button
                   key={status}
-                  onClick={() => setFilterStatus(status as OrderStatus | 'All')}
+                  onClick={() => setFilterStatus(status as OrderStatus | 'All' | 'Today')}
                   className={`px-4 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${
                       filterStatus === status 
                       ? 'bg-white text-gray-900 shadow-sm' 
