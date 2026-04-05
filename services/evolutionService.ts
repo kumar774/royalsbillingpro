@@ -1,7 +1,7 @@
 import { toast } from 'react-hot-toast';
 
-const EVOLUTION_BASE_URL = 'https://evolution-api-production-3ebc.up.railway.app';
-const API_KEY = 'ae9ee71df7ddb5b3f09f1fff88a8785f0c9c37da6a35c972638d383d8787f124';
+const EVOLUTION_BASE_URL = 'http://51.20.107.180:8080';
+const API_KEY = '4ea31e99d030068b1ee039135d5ea6a60254b961cbbe1bed02972fa361c4582d';
 
 /**
  * RENDER PERSISTENCE CONFIGURATION:
