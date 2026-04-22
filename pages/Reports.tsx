@@ -86,7 +86,7 @@ const Reports: React.FC = () => {
       return;
     }
     if (!rangeKeys) {
-      setRangeError('Please select valid custom start/end dates.');
+      setRangeError(null);
       return;
     }
     const start = new Date(`${rangeKeys.startKey}T00:00:00+05:30`);
@@ -381,7 +381,16 @@ const Reports: React.FC = () => {
             ].map(([k, label]) => (
               <button
                 key={k}
-                onClick={() => setRange(k as RangeType)}
+                onClick={() => {
+                  const next = k as RangeType;
+                  if (next === 'custom') {
+                    const today = toISTDateKey(new Date());
+                    const defaultStart = `${today.slice(0, 8)}01`;
+                    setCustomStart((prev) => prev || defaultStart);
+                    setCustomEnd((prev) => prev || today);
+                  }
+                  setRange(next);
+                }}
                 className={`px-3 py-2 text-sm ${range === k ? 'bg-gray-100 font-bold' : 'hover:bg-gray-50'}`}
               >
                 {label}
@@ -614,4 +623,3 @@ const Panel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, 
 );
 
 export default Reports;
-
