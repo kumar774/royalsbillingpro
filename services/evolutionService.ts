@@ -281,7 +281,20 @@ export const fetchEvolutionGroups = async (instanceName: string): Promise<Evolut
       throw new Error(`Failed to fetch groups: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+      console.log(`[fetchEvolutionGroups] Received empty response from server for ${instanceName}`);
+      return [];
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (pe) {
+      console.warn(`[fetchEvolutionGroups] Failed to parse JSON response:`, text);
+      return [];
+    }
+
     // Some versions wrap the array or return it directly
     const groupsArray = Array.isArray(data) ? data : (data?.groups || []);
     return groupsArray.map((g: any) => ({
