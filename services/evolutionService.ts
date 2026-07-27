@@ -326,7 +326,7 @@ export const addParticipantToGroup = async (instanceName: string, groupJid: stri
     },
     body: JSON.stringify({
       action: 'add',
-      participants: [cleanNumber]
+      participants: [`${cleanNumber}@s.whatsapp.net`]
     })
   });
 
@@ -349,7 +349,7 @@ export const createEvolutionGroup = async (
     if (!clean.startsWith('91') && clean.length === 10) {
       clean = '91' + clean;
     }
-    return clean;
+    return `${clean}@s.whatsapp.net`;
   });
 
   const response = await fetch(`${EVOLUTION_BASE_URL}/group/create/${instanceName}`, {

@@ -177,8 +177,8 @@ const CRM: React.FC = () => {
           setWaStatus('CONNECTING');
           checks++;
           
-          // If connecting for > 20 seconds (4 checks * 5s)
-          if (checks > 4) {
+          // If connecting for > 90 seconds (18 checks * 5s)
+          if (checks > 18) {
              handleAutoRestart();
              checks = 0;
           }
