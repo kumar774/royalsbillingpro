@@ -257,3 +257,110 @@ export const getEvolutionQR = async (instanceName: string): Promise<string> => {
   
   throw new Error("Failed to retrieve QR code.");
 };
+
+export interface EvolutionGroup {
+  id: string;
+  subject: string;
+  size?: number;
+}
+
+/**
+ * Fetches all WhatsApp groups for the instance
+ */
+export const fetchEvolutionGroups = async (instanceName: string): Promise<EvolutionGroup[]> => {
+  try {
+    const response = await fetch(`${EVOLUTION_BASE_URL}/group/fetchAllGroups/${instanceName}?getParticipants=false`, {
+      method: 'GET',
+      headers: {
+        'apikey': API_KEY,
+        'ngrok-skip-browser-warning': 'true'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch groups: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    // Some versions wrap the array or return it directly
+    const groupsArray = Array.isArray(data) ? data : (data?.groups || []);
+    return groupsArray.map((g: any) => ({
+      id: g.id || g.jid || '',
+      subject: g.subject || g.name || 'Unnamed Group',
+      size: g.size || (g.participants ? g.participants.length : 0)
+    })).filter((g: any) => g.id);
+  } catch (error) {
+    console.error('Failed to fetch WhatsApp groups:', error);
+    throw error;
+  }
+};
+
+/**
+ * Adds a participant (phone number) to a WhatsApp group
+ */
+export const addParticipantToGroup = async (instanceName: string, groupJid: string, phone: string): Promise<void> => {
+  let cleanNumber = phone.replace(/\D/g, '');
+  if (!cleanNumber.startsWith('91') && cleanNumber.length === 10) {
+    cleanNumber = '91' + cleanNumber;
+  }
+
+  const response = await fetch(`${EVOLUTION_BASE_URL}/group/updateParticipant/${instanceName}?groupJid=${groupJid}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': API_KEY,
+      'ngrok-skip-browser-warning': 'true'
+    },
+    body: JSON.stringify({
+      action: 'add',
+      participants: [cleanNumber]
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || `Failed to add participant to group: ${response.statusText}`);
+  }
+};
+
+/**
+ * Creates a new WhatsApp group with given participants
+ */
+export const createEvolutionGroup = async (
+  instanceName: string, 
+  groupName: string, 
+  phones: string[]
+): Promise<{ jid: string; groupMetadata: any }> => {
+  const formattedParticipants = phones.map(p => {
+    let clean = p.replace(/\D/g, '');
+    if (!clean.startsWith('91') && clean.length === 10) {
+      clean = '91' + clean;
+    }
+    return clean;
+  });
+
+  const response = await fetch(`${EVOLUTION_BASE_URL}/group/create/${instanceName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': API_KEY,
+      'ngrok-skip-browser-warning': 'true'
+    },
+    body: JSON.stringify({
+      groupName: groupName,
+      participants: formattedParticipants
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || `Failed to create group: ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  return {
+    jid: result?.jid || result?.id || result?.groupMetadata?.id || '',
+    groupMetadata: result
+  };
+};
+

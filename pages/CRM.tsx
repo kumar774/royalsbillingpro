@@ -3,11 +3,11 @@ import { collection, query, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useRestaurants } from '../context/RestaurantContext';
 import { Order } from '../types';
-import { MessageSquare, Download, Phone, TrendingUp, Award, AlertCircle, Send, X, Search, Filter, Calendar, List, DollarSign, Users, Activity, Loader2, Clock, QrCode, Plus } from 'lucide-react';
+import { MessageSquare, Download, Phone, TrendingUp, Award, AlertCircle, Send, X, Search, Filter, Calendar, List, DollarSign, Users, Activity, Loader2, Clock, QrCode, Plus, Store } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-hot-toast';
-import { sendBulkEvolutionMessage, getEvolutionQR, sendEvolutionMessage, checkConnectionStatus, restartInstance, logoutEvolutionInstance } from '../services/evolutionService';
+import { sendBulkEvolutionMessage, getEvolutionQR, sendEvolutionMessage, checkConnectionStatus, restartInstance, logoutEvolutionInstance, fetchEvolutionGroups, addParticipantToGroup, createEvolutionGroup, EvolutionGroup } from '../services/evolutionService';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface CustomerData {
@@ -89,6 +89,17 @@ const CRM: React.FC = () => {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isAutoFixing, setIsAutoFixing] = useState(false);
+
+  // WhatsApp Group States
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [groupTargetCustomers, setGroupTargetCustomers] = useState<CustomerData[]>([]);
+  const [groups, setGroups] = useState<EvolutionGroup[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [activeModalTab, setActiveModalTab] = useState<'add' | 'create'>('add');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [searchGroupQuery, setSearchGroupQuery] = useState('');
+  const [addingProgress, setAddingProgress] = useState<{ current: number; total: number; active: boolean }>({ current: 0, total: 0, active: false });
 
   const now = new Date();
   const INSTANCE_NAME = restaurantId ? `CraveWave_${restaurantId}` : 'CraveWave_Default';
@@ -236,6 +247,120 @@ const CRM: React.FC = () => {
       setShowQRModal(false); 
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleAutoFix = async () => {
+    if (isAutoFixing) return;
+    setIsAutoFixing(true);
+    toast.loading("Initiating Auto-Fix: Resetting WhatsApp Instance...", { id: 'autofix' });
+    try {
+      // Step 1: Force logout & delete instance to clean up session locks
+      await logoutEvolutionInstance(INSTANCE_NAME).catch(() => {});
+      // Wait a short moment
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Step 2: Show QR flow to recreate and generate fresh session
+      setIsConnecting(true);
+      setWaStatus('CONNECTING');
+      setShowQRModal(true);
+      setQrCode(null);
+      
+      const qr = await getEvolutionQR(INSTANCE_NAME);
+      if (qr) {
+        setQrCode(qr);
+        setWaStatus('WAITING_QR');
+        toast.success("Instance Reset! Please scan the new QR code.", { id: 'autofix' });
+      } else {
+        throw new Error("No QR returned");
+      }
+    } catch (e: any) {
+      console.error("Auto-Fix failed:", e);
+      toast.error(e.message || "Auto-Fix failed. Please try again.", { id: 'autofix' });
+      setWaStatus('DISCONNECTED');
+      setShowQRModal(false);
+    } finally {
+      setIsConnecting(false);
+      setIsAutoFixing(false);
+    }
+  };
+
+  // WhatsApp Groups fetch when group modal opens
+  useEffect(() => {
+    if (showGroupModal && waStatus === 'READY') {
+      const loadGroups = async () => {
+        setLoadingGroups(true);
+        try {
+          const list = await fetchEvolutionGroups(INSTANCE_NAME);
+          setGroups(list);
+        } catch (e) {
+          toast.error("Failed to load WhatsApp groups. Ensure instance is connected.");
+        } finally {
+          setLoadingGroups(false);
+        }
+      };
+      loadGroups();
+    }
+  }, [showGroupModal, waStatus, INSTANCE_NAME]);
+
+  const handleAddToGroup = async (groupJid: string, groupSubject: string) => {
+    if (groupTargetCustomers.length === 0) return;
+    
+    setAddingProgress({ current: 0, total: groupTargetCustomers.length, active: true });
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < groupTargetCustomers.length; i++) {
+      const customer = groupTargetCustomers[i];
+      setAddingProgress(prev => ({ ...prev, current: i + 1 }));
+      try {
+        await addParticipantToGroup(INSTANCE_NAME, groupJid, customer.phone);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to add ${customer.name} to group:`, err);
+        failCount++;
+      }
+      
+      // Safety delay for anti-ban
+      if (i < groupTargetCustomers.length - 1) {
+        const delay = 2000 + Math.random() * 2000;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    setAddingProgress({ current: 0, total: 0, active: false });
+    setShowGroupModal(false);
+    
+    if (failCount === 0) {
+      toast.success(`Successfully added all ${successCount} customers to "${groupSubject}"!`);
+    } else {
+      toast.success(`Added ${successCount} customers to "${groupSubject}". ${failCount} failed.`);
+    }
+  };
+
+  const handleCreateNewGroup = async () => {
+    if (!newGroupName.trim()) {
+      toast.error("Please enter a group name");
+      return;
+    }
+    if (groupTargetCustomers.length === 0) {
+      toast.error("No customers selected for the group");
+      return;
+    }
+    
+    toast.loading("Creating new WhatsApp Group...", { id: 'create-group' });
+    try {
+      const phones = groupTargetCustomers.map(c => c.phone);
+      const result = await createEvolutionGroup(INSTANCE_NAME, newGroupName, phones);
+      toast.success(`Group "${newGroupName}" created successfully!`, { id: 'create-group' });
+      setShowGroupModal(false);
+      setNewGroupName('');
+      // Reload groups list
+      const list = await fetchEvolutionGroups(INSTANCE_NAME).catch(() => []);
+      setGroups(list);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to create group", { id: 'create-group' });
     }
   };
 
@@ -584,11 +709,21 @@ const CRM: React.FC = () => {
                 (waStatus === 'CONNECTING' || waStatus === 'WAITING_QR') ? 'bg-yellow-500 animate-bounce' : 
                 'bg-red-500'
               }`}></span>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600 mr-2">
                 {waStatus === 'READY' ? 'Connected' : 
                  (waStatus === 'CONNECTING' || waStatus === 'WAITING_QR') ? 'Connecting...' : 
                  'Disconnected'}
               </span>
+              {(waStatus === 'CONNECTING' || waStatus === 'WAITING_QR') && (
+                <button 
+                  onClick={handleAutoFix}
+                  disabled={isAutoFixing}
+                  className="text-[9px] bg-red-100 text-red-600 hover:bg-red-200 px-1.5 py-0.5 rounded font-bold transition flex items-center gap-1"
+                  title="Force Instance Reboot and Session Refresh"
+                >
+                  {isAutoFixing ? 'Fixing...' : 'Auto-Fix ⚡'}
+                </button>
+              )}
             </div>
           </div>
           <p className="text-sm text-gray-500 flex items-center">
@@ -604,19 +739,30 @@ const CRM: React.FC = () => {
               <X className="h-4 w-4 mr-2" /> Disconnect
             </button>
           ) : (
-            <button 
-              onClick={handleShowQR}
-              disabled={waStatus === 'CONNECTING' || waStatus === 'WAITING_QR'}
-              className={`${
-                waStatus === 'CLOSE' ? 'bg-orange-600 hover:bg-orange-700' : 
-                'bg-blue-600 hover:bg-blue-700'
-              } text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              <QrCode className="h-4 w-4 mr-2" /> 
-              {waStatus === 'CLOSE' ? 'Reconnect WhatsApp' : 
-               (waStatus === 'CONNECTING' || waStatus === 'WAITING_QR') ? 'Connecting...' : 
-               'Connect WhatsApp'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleShowQR}
+                disabled={waStatus === 'CONNECTING' || waStatus === 'WAITING_QR'}
+                className={`${
+                  waStatus === 'CLOSE' ? 'bg-orange-600 hover:bg-orange-700' : 
+                  'bg-blue-600 hover:bg-blue-700'
+                } text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                <QrCode className="h-4 w-4 mr-2" /> 
+                {waStatus === 'CLOSE' ? 'Reconnect WhatsApp' : 
+                 (waStatus === 'CONNECTING' || waStatus === 'WAITING_QR') ? 'Connecting...' : 
+                 'Connect WhatsApp'}
+              </button>
+              {(waStatus === 'CONNECTING' || waStatus === 'WAITING_QR' || waStatus === 'CLOSE') && (
+                <button 
+                  onClick={handleDisconnect}
+                  className="bg-red-50 text-red-500 border border-red-100 px-3 py-2 rounded-lg text-xs font-semibold flex items-center hover:bg-red-100 transition shadow-sm"
+                  title="Force Reset Session"
+                >
+                  <X className="h-3.5 w-3.5 mr-1" /> Reset
+                </button>
+              )}
+            </div>
           )}
           <button 
             onClick={exportToExcel}
@@ -631,6 +777,18 @@ const CRM: React.FC = () => {
             className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition ${selectedCustomers.length > 0 && waStatus === 'READY' ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
           >
             <MessageSquare className="h-4 w-4 mr-2" /> Bulk Message ({selectedCustomers.length})
+          </button>
+          <button 
+            onClick={() => {
+              const selectedObjects = customers.filter(c => selectedCustomers.includes(c.id));
+              setGroupTargetCustomers(selectedObjects);
+              setShowGroupModal(true);
+            }}
+            disabled={selectedCustomers.length === 0 || waStatus !== 'READY'}
+            title={waStatus !== 'READY' ? "Please connect WhatsApp API first" : ""}
+            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center shadow-sm transition ${selectedCustomers.length > 0 && waStatus === 'READY' ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+          >
+            <Plus className="h-4 w-4 mr-2" /> Add Group ({selectedCustomers.length})
           </button>
         </div>
       </div>
@@ -940,13 +1098,28 @@ const CRM: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-4 px-6 text-center">
-                      <button
-                        onClick={() => openCustomMessageModal(customer)}
-                        className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-lg transition-colors flex items-center justify-center mx-auto"
-                      >
-                        <MessageSquare className="h-4 w-4 mr-1" />
-                        <span className="text-[10px] font-bold">WhatsApp</span>
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => openCustomMessageModal(customer)}
+                          className="p-2 bg-green-50 hover:bg-green-100 text-green-600 rounded-lg transition-colors flex items-center justify-center"
+                          title="Send WhatsApp Message"
+                        >
+                          <MessageSquare className="h-4 w-4 mr-1" />
+                          <span className="text-[10px] font-bold">WhatsApp</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setGroupTargetCustomers([customer]);
+                            setShowGroupModal(true);
+                          }}
+                          disabled={waStatus !== 'READY'}
+                          title={waStatus !== 'READY' ? "Please connect WhatsApp API first" : "Add to Group"}
+                          className={`p-2 rounded-lg transition-colors flex items-center justify-center ${waStatus === 'READY' ? 'bg-blue-50 hover:bg-blue-100 text-blue-600' : 'bg-gray-50 text-gray-400 cursor-not-allowed'}`}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          <span className="text-[10px] font-bold">Group</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1048,6 +1221,158 @@ const CRM: React.FC = () => {
                 <Download className="h-4 w-4 mr-2" /> Export
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Group Modal */}
+      {showGroupModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 animate-fade-in flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">WhatsApp Group Management</h3>
+                <p className="text-xs text-gray-500">
+                  Target: <span className="font-bold text-blue-600">{groupTargetCustomers.length}</span> customer(s)
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  if (!addingProgress.active) {
+                    setShowGroupModal(false);
+                    setNewGroupName('');
+                  }
+                }} 
+                disabled={addingProgress.active}
+                className="text-gray-400 hover:text-gray-600 disabled:opacity-30"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {addingProgress.active ? (
+              <div className="py-8 text-center flex flex-col items-center">
+                <Loader2 className="h-12 w-12 text-blue-600 animate-spin mb-4" />
+                <p className="text-sm font-bold text-gray-800">Adding to group...</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Processing customer {addingProgress.current} of {addingProgress.total}
+                </p>
+                <div className="w-full bg-gray-100 rounded-full h-2 mt-4 overflow-hidden">
+                  <div 
+                    className="bg-blue-600 h-full transition-all duration-300"
+                    style={{ width: `${(addingProgress.current / addingProgress.total) * 100}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-gray-400 italic mt-3">
+                  Using safe random anti-ban delays. Do not close this modal.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Tabs */}
+                <div className="flex border-b border-gray-100 mb-4">
+                  <button
+                    onClick={() => setActiveModalTab('add')}
+                    className={`flex-1 pb-2 text-sm font-bold transition-all border-b-2 ${activeModalTab === 'add' ? 'text-blue-600 border-blue-600' : 'text-gray-400 border-transparent hover:text-gray-600'}`}
+                  >
+                    Add to Existing Group
+                  </button>
+                  <button
+                    onClick={() => setActiveModalTab('create')}
+                    className={`flex-1 pb-2 text-sm font-bold transition-all border-b-2 ${activeModalTab === 'create' ? 'text-blue-600 border-blue-600' : 'text-gray-400 border-transparent hover:text-gray-600'}`}
+                  >
+                    Create New Group
+                  </button>
+                </div>
+
+                {activeModalTab === 'add' ? (
+                  <div className="flex-1 flex flex-col overflow-hidden min-h-[300px]">
+                    {/* Search Groups */}
+                    <div className="relative mb-3">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search groups..."
+                        value={searchGroupQuery}
+                        onChange={(e) => setSearchGroupQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+
+                    {loadingGroups ? (
+                      <div className="flex-1 flex flex-col items-center justify-center py-10">
+                        <Loader2 className="h-8 w-8 text-blue-600 animate-spin mb-2" />
+                        <p className="text-xs text-gray-500 font-medium">Fetching groups from WhatsApp...</p>
+                      </div>
+                    ) : (
+                      <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[350px]">
+                        {groups
+                          .filter(g => g.subject.toLowerCase().includes(searchGroupQuery.toLowerCase()))
+                          .map(group => (
+                            <div 
+                              key={group.id} 
+                              className="p-3 bg-gray-50 rounded-lg border border-gray-100 flex justify-between items-center hover:bg-blue-50/30 transition-colors"
+                            >
+                              <div className="flex items-center gap-2 overflow-hidden mr-2">
+                                <Store className="h-5 w-5 text-blue-500 flex-shrink-0" />
+                                <div className="text-left overflow-hidden">
+                                  <p className="text-xs font-bold text-gray-900 truncate" title={group.subject}>
+                                    {group.subject}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 truncate" title={group.id}>
+                                    ID: {group.id}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleAddToGroup(group.id, group.subject)}
+                                className="px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-lg text-xs font-bold transition flex-shrink-0"
+                              >
+                                Add Member
+                              </button>
+                            </div>
+                          ))}
+
+                        {groups.filter(g => g.subject.toLowerCase().includes(searchGroupQuery.toLowerCase())).length === 0 && (
+                          <div className="text-center py-8 text-gray-400 text-xs">
+                            No groups found.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-700 mb-1 uppercase tracking-wider">Group Name</label>
+                      <input
+                        type="text"
+                        value={newGroupName}
+                        onChange={(e) => setNewGroupName(e.target.value)}
+                        placeholder="e.g. VIP Club Touchwood"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+
+                    <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 text-xs text-blue-800">
+                      <p className="font-bold mb-1">Creating WhatsApp Group directly:</p>
+                      <ul className="list-disc list-inside space-y-1 text-[11px] text-blue-700">
+                        <li>Creates a WhatsApp Group on your phone automatically.</li>
+                        <li>Initializes the group with selected customer numbers.</li>
+                        <li>Connected instance must have admin rights on WhatsApp.</li>
+                      </ul>
+                    </div>
+
+                    <button
+                      onClick={handleCreateNewGroup}
+                      className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      <Plus className="h-4 w-4" /> Create Group & Add Customers
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
