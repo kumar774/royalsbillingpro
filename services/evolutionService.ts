@@ -1,7 +1,7 @@
 import { toast } from 'react-hot-toast';
 
 const EVOLUTION_BASE_URL = 'https://evo.welcofincarepvt.com';
-const API_KEY = '4a81fbf7d23db2369899f6e2a1c762ded42bc445984dd55f33bfa808f06996f2';
+const API_KEY = '4a51fbf7d23db2369899f6e2a1c7d2ded42bc4459d4d55f33bfa808f0699cf2';
 
 /**
  * RENDER PERSISTENCE CONFIGURATION:
