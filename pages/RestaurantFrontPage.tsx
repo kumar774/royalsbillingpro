@@ -18,6 +18,11 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
   const { slug } = useParams<{ slug: string }>();
   const [activeCategoryGroup, setActiveCategoryGroup] = useState<string | 'All'>('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [visibleCount, setVisibleCount] = useState(20);
+
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [activeCategoryGroup, searchTerm]);
   
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,6 +59,10 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
       return matchesCategoryGroup && matchesSearch;
     });
   }, [restaurant?.menu, activeCategoryGroup, searchTerm]);
+
+  const slicedMenu = useMemo(() => {
+    return filteredMenu.slice(0, visibleCount);
+  }, [filteredMenu, visibleCount]);
 
   useEffect(() => {
     restaurantFromContextRef.current = restaurantFromContext;
@@ -249,7 +258,7 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
   const primaryColor = restaurant.theme?.primaryColor || '#ea580c';
 
   // Group menu items by category
-  const groupedMenu = filteredMenu.reduce((acc, item) => {
+  const groupedMenu = slicedMenu.reduce((acc, item) => {
     const categoryGroup = item.categoryGroup || 'Uncategorized';
     if (!acc[categoryGroup]) {
       acc[categoryGroup] = [];
@@ -263,10 +272,10 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
       <RestaurantHero restaurant={restaurant} deliveryTime={(restaurant as unknown as import('../types').RestaurantSettings).deliveryTime} />
       
       {/* Sticky Menu Navigation */}
-      <div className="sticky top-0 z-0 bg-white shadow-md">
+      <div className="sticky top-16 z-30 bg-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-           <div className="flex items-center justify-between py-4 gap-4">
-              <div className="flex flex-wrap gap-2 md:gap-8">
+           <div className="flex items-center justify-between py-4 gap-4 overflow-hidden">
+              <div className="flex-1 overflow-x-auto whitespace-nowrap no-scrollbar flex gap-3 md:gap-8">
                  {categoryGroups.map((cat) => (
                     <button
                       key={cat}
@@ -275,7 +284,7 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
                           color: activeCategoryGroup === cat ? primaryColor : undefined,
                           borderColor: activeCategoryGroup === cat ? primaryColor : undefined
                       }}
-                      className={`text-sm font-medium pb-2 border-b-2 transition-colors ${
+                      className={`text-sm font-bold pb-1.5 border-b-2 transition-colors flex-shrink-0 cursor-pointer ${
                         activeCategoryGroup === cat 
                         ? '' // Style applied via inline style for dynamic color
                         : 'border-transparent text-gray-500 hover:text-gray-900'
@@ -302,26 +311,52 @@ const RestaurantFrontPage: React.FC<RestaurantFrontPageProps> = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Mobile Search Bar */}
+        <div className="lg:hidden mb-6 relative">
+           <input 
+             type="text" 
+             value={searchTerm}
+             onChange={(e) => setSearchTerm(e.target.value)}
+             placeholder="Search menu..."
+             className="w-full pl-10 pr-4 py-2.5 bg-gray-100 rounded-2xl text-sm focus:ring-1 outline-none border-0"
+             style={{ '--tw-ring-color': primaryColor } as React.CSSProperties}
+           />
+           <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-3.5" />
+        </div>
+
         <div className="mb-6 flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-800">
                 {activeCategoryGroup === 'All' ? 'Full Menu' : `${activeCategoryGroup} Menu`}
             </h2>
-            <span className="text-gray-500 text-sm">{filteredMenu.length} items</span>
+            <span className="text-gray-500 text-sm font-bold">{filteredMenu.length} items</span>
         </div>
         
         {filteredMenu.length > 0 ? (
-            categoryGroups.filter(cat => cat !== 'All' && groupedMenu[cat]).map(categoryGroup => (
-                <div key={categoryGroup} className="mb-8">
-                    <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2 border-gray-200">{categoryGroup}</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
-                        {groupedMenu[categoryGroup].map(item => (
-                            <div key={item.id} className="h-full">
-                                <MenuItemCard item={item} restaurantId={restaurant.id} />
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            ))
+            <>
+              {categoryGroups.filter(cat => cat !== 'All' && groupedMenu[cat]).map(categoryGroup => (
+                  <div key={categoryGroup} className="mb-8">
+                      <h3 className="text-xl font-bold text-gray-800 mb-4 border-b pb-2 border-gray-200">{categoryGroup}</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 md:gap-8">
+                          {groupedMenu[categoryGroup].map(item => (
+                              <div key={item.id} className="h-full">
+                                  <MenuItemCard item={item} restaurantId={restaurant.id} />
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              ))}
+              {filteredMenu.length > visibleCount && (
+                  <div className="flex justify-center mt-8 mb-4">
+                      <button
+                        onClick={() => setVisibleCount(prev => prev + 20)}
+                        style={{ color: primaryColor, borderColor: primaryColor }}
+                        className="px-6 py-2.5 bg-white hover:bg-orange-50 border rounded-xl text-sm font-bold shadow-sm hover:shadow transition flex items-center gap-1.5"
+                      >
+                        Load More Items ({filteredMenu.length - visibleCount} remaining)
+                      </button>
+                  </div>
+              )}
+            </>
         ) : (
             <div className="text-center py-20">
                 <p className="text-gray-500 text-lg">No items found matching your criteria.</p>

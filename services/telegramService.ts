@@ -25,7 +25,7 @@ export const sendTelegramMessage = async (botToken: string, chatId: string, mess
   }
 };
 
-const escapeHtml = (unsafe: string) => {
+export const escapeHtml = (unsafe: string) => {
   if (!unsafe) return '';
   return String(unsafe)
     .replace(/&/g, "&amp;")

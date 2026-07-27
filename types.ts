@@ -135,7 +135,7 @@ export interface RestaurantPageSettings {
   };
 }
 
-export interface Restaurant {
+export interface Restaurant extends RestaurantSettings {
   id: string;
   name: string;
   slug: string;
@@ -146,6 +146,7 @@ export interface Restaurant {
   menu: MenuItem[];
   isActive?: boolean;
   categoryOrder?: string[];
+  contact?: string;
 }
 
 export interface CartItem extends MenuItem {
@@ -180,6 +181,8 @@ export interface Order {
   customerPhone?: string;
   tableNo?: string;
   createdAt: string; 
+  deliveryAddress?: string;
+  isNewCustomer?: boolean;
   // Payment Tracking
   paymentStatus?: PaymentStatus;
   paymentMethod?: PaymentMethod;
@@ -211,6 +214,8 @@ export interface LastOrderDetails {
   restaurantIds?: string[];
   paymentQrLink?: string; // New field for the payment QR link
   restaurantId?: string;
+  deliveryAddress?: string;
+  isNewCustomer?: boolean;
 }
 
 export interface ExpenseItem {
@@ -227,4 +232,49 @@ export interface Expense {
   note?: string;
   isItemized?: boolean;
   items?: ExpenseItem[];
+}
+
+export interface StaffMember {
+  id: string;
+  name: string;
+  phone: string;
+  role: 'Chef' | 'Waiter' | 'Manager' | 'Delivery Boy' | 'Cashier' | 'Cleaner' | 'Other';
+  baseSalary: number;
+  joiningDate: string;
+  status: 'Active' | 'Inactive';
+  createdAt: string;
+  outstandingAdvance: number;
+  totalPaidSalary: number;
+  loginEmail?: string;
+  loginUid?: string;
+}
+
+export interface StaffTransaction {
+  id: string;
+  type: 'Salary Paid' | 'Advance Given' | 'Bonus' | 'Deduction';
+  amount: number;
+  date: string;
+  monthYear: string;
+  paymentMethod: 'Cash' | 'Online';
+  notes?: string;
+  expenseId?: string;
+}
+
+export interface ModulePermission {
+  view: boolean;
+  add: boolean;
+  edit: boolean;
+  delete: boolean;
+}
+
+export interface RolePermissions {
+  dashboard: ModulePermission;
+  pos: ModulePermission;
+  orders: ModulePermission;
+  menu: ModulePermission;
+  expenses: ModulePermission;
+  staff: ModulePermission;
+  reports: ModulePermission;
+  customers: ModulePermission;
+  settings: ModulePermission;
 }

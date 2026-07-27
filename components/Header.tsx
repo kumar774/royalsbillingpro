@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ShoppingBag, Search, UtensilsCrossed, ChevronDown, Store } from 'lucide-react';
+import { ShoppingBag, Search, UtensilsCrossed, ChevronDown, Store, LogOut, LayoutDashboard } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useRestaurants } from '../context/RestaurantContext';
 import { Restaurant } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 const Header: React.FC = () => {
   const { totalItems, toggleCart } = useCart();
@@ -12,13 +13,19 @@ const Header: React.FC = () => {
   const { restaurants, selectedRestaurant, setSelectedRestaurant } = useRestaurants();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const navigate = useNavigate();
+  const { user, userProfile, loading, logout } = useAuth();
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -130,13 +137,74 @@ const Header: React.FC = () => {
 
           {/* Right Actions */}
           <div className="flex items-center space-x-4">
-             <Link to="/login" className="hidden sm:block text-gray-500 hover:text-gray-900 font-medium text-sm">
-                Sign In
-             </Link>
+             {loading ? (
+               <div className="h-8 w-8 rounded-full bg-gray-100 animate-pulse hidden sm:block" />
+             ) : user ? (
+               <div className="flex items-center space-x-4">
+                 {userProfile?.role && userProfile.role !== 'customer' && (
+                   <Link 
+                     to={`/dashboard/${userProfile.restaurantId || 'resto-001'}`}
+                     className="hidden sm:flex items-center space-x-1.5 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-md shadow-orange-500/20 hover:shadow-lg transition-all"
+                   >
+                     <LayoutDashboard className="h-3.5 w-3.5" />
+                     <span>Go To Dashboard</span>
+                   </Link>
+                 )}
+                 
+                 {/* Header Profile Dropdown */}
+                 <div className="relative" ref={profileRef}>
+                   <button 
+                     onClick={() => setIsProfileOpen(!isProfileOpen)}
+                     className="h-9 w-9 bg-orange-100 rounded-full flex items-center justify-center text-orange-700 font-bold text-sm hover:bg-orange-200 transition-colors border-2 border-white shadow-sm cursor-pointer"
+                   >
+                     {user.email?.substring(0, 2).toUpperCase() || 'US'}
+                   </button>
+
+                   {isProfileOpen && (
+                     <div className="absolute top-full right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-2 z-50 animate-fade-in">
+                       <div className="px-4 py-2 border-b border-gray-50 mb-1">
+                         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Signed In As</p>
+                         <p className="text-sm font-medium text-gray-700 truncate">{user.email}</p>
+                         <span className="inline-flex items-center px-2 py-0.5 mt-1 rounded text-xs font-medium bg-orange-50 text-orange-800 capitalize">
+                           {userProfile?.role || 'Customer'}
+                         </span>
+                       </div>
+                       
+                       {userProfile?.role && userProfile.role !== 'customer' && (
+                         <Link 
+                           to={`/dashboard/${userProfile.restaurantId || 'resto-001'}`}
+                           onClick={() => setIsProfileOpen(false)}
+                           className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-gray-50 transition text-gray-600 text-sm font-medium"
+                         >
+                           <LayoutDashboard className="h-4 w-4 text-gray-400" />
+                           <span>Go to Dashboard</span>
+                         </Link>
+                       )}
+
+                       <button 
+                         onClick={async () => {
+                           setIsProfileOpen(false);
+                           await logout();
+                           navigate('/');
+                         }}
+                         className="w-full text-left px-4 py-2.5 flex items-center space-x-3 hover:bg-red-50 transition text-red-600 text-sm font-medium border-t border-gray-50 mt-1 pt-2 cursor-pointer"
+                       >
+                         <LogOut className="h-4 w-4" />
+                         <span>Sign Out</span>
+                       </button>
+                     </div>
+                   )}
+                 </div>
+               </div>
+             ) : (
+               <Link to="/login" className="hidden sm:block text-gray-500 hover:text-gray-900 font-medium text-sm transition-colors duration-200">
+                  Sign In
+               </Link>
+             )}
              
              <button 
                 onClick={toggleCart}
-                className="relative p-2 text-gray-600 hover:text-orange-600 transition-colors rounded-full hover:bg-orange-50"
+                className="relative p-2 text-gray-600 hover:text-orange-600 transition-colors rounded-full hover:bg-orange-50 cursor-pointer"
              >
                <ShoppingBag className="h-6 w-6" />
                {totalItems > 0 && (

@@ -2,15 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { MenuItem, CategoryType } from '../types';
-import { Plus, Edit2, Trash2, X, Image as ImageIcon, Upload, ChevronDown, Image as ImageLucide, Check, AlertCircle, Scissors, BrainCircuit, FileSpreadsheet } from 'lucide-react';
+import { MenuItem, CategoryType, RolePermissions } from '../types';
+import { Plus, Edit2, Trash2, X, Image as ImageIcon, Upload, ChevronDown, Image as ImageLucide, Check, AlertCircle, Scissors, BrainCircuit, FileSpreadsheet, Download } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import Badge from '../components/ui/Badge';
 import { useRestaurants } from '../context/RestaurantContext';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 
-const MenuManager: React.FC = () => {
+interface MenuManagerProps {
+  permissions?: RolePermissions;
+}
+
+const MenuManager: React.FC<MenuManagerProps> = ({ permissions }) => {
   const { restaurantId } = useParams<{ restaurantId: string }>();
   const { restaurants } = useRestaurants(); 
   const [items, setItems] = useState<MenuItem[]>([]);
@@ -24,6 +28,7 @@ const MenuManager: React.FC = () => {
   const [uploadType, setUploadType] = useState<'image' | 'excel' | null>(null);
   const [isImportDropdownOpen, setIsImportDropdownOpen] = useState(false);
   const [filterCategoryGroup, setFilterCategoryGroup] = useState<string>('All');
+  const [newCategoryInput, setNewCategoryInput] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const importDropdownRef = React.useRef<HTMLDivElement>(null);
 
@@ -100,12 +105,12 @@ const MenuManager: React.FC = () => {
 
 
   const handleAddCategory = async () => {
-    if (!restaurantId || !formData.categoryGroup.trim()) {
+    if (!restaurantId || !newCategoryInput.trim()) {
       toast.error("Please enter a category name.");
       return;
     }
 
-    const newCategory = formData.categoryGroup.trim();
+    const newCategory = newCategoryInput.trim();
     if (currentRestaurant?.customCategories?.includes(newCategory)) {
       toast.error("Category already exists.");
       return;
@@ -118,6 +123,7 @@ const MenuManager: React.FC = () => {
         customCategories: [...(currentRestaurant?.customCategories || []), newCategory]
       });
       toast.success("Category added successfully!", { id: toastId });
+      setNewCategoryInput('');
     } catch (error) {
       console.error("Error adding category:", error);
       toast.error("Failed to add category.", { id: toastId });
@@ -129,6 +135,17 @@ const MenuManager: React.FC = () => {
     if (!restaurantId) {
       toast.error("No restaurant ID found.");
       return;
+    }
+
+    if (permissions) {
+      if (editingItem && !permissions.menu.edit) {
+        toast.error("You do not have permission to edit menu items.");
+        return;
+      }
+      if (!editingItem && !permissions.menu.add) {
+        toast.error("You do not have permission to add menu items.");
+        return;
+      }
     }
 
     const toastId = toast.loading(editingItem ? "Updating item..." : "Adding item...");
@@ -364,48 +381,141 @@ const MenuManager: React.FC = () => {
   };
 
   const analyzeExcel = async (file: File): Promise<Partial<MenuItem>[]> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(worksheet) as { Name?: string; name?: string; Price?: number; price?: number; Category?: string; category?: string; Description?: string; description?: string }[];
-        
-        const items = json.map(row => ({
-          name: row.Name || row.name || '',
-          price: parseFloat(String(row.Price || row.price || 0)),
-          categoryGroup: row.Category || row.category || categorizeItem(row.Name || row.name || ''),
-          description: row.Description || row.description || '',
-          image: `https://loremflickr.com/400/300/${encodeURIComponent((row.Name || row.name || 'food').toLowerCase().replace(/ /g, '-'))},food`,
-          available: true,
-        }));
-        resolve(items);
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const json = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+          
+          const items = json.map((row: any) => {
+            const name = row.Name || row.name || row['Item Name'] || row['item_name'] || row['Item'] || row['item'] || '';
+            const priceVal = row.Price || row.price || row.Rate || row.rate || row.MRP || row.mrp || row.Amount || row.amount || 0;
+            const price = parseFloat(String(priceVal)) || 0;
+            const category = row.Category || row.category || row['Category Group'] || row['category_group'] || row['Type'] || row['type'] || categorizeItem(String(name));
+            const description = row.Description || row.description || row['Item Description'] || row['Note'] || row['note'] || '';
+            
+            // Parse variants: "Regular: 299, Medium: 399, Large: 499"
+            const variantsStr = row.Variants || row.variants || row['Price Variants'] || row['price_variants'] || '';
+            const variants: { size: string; price: number }[] = [];
+            if (variantsStr) {
+              const parts = String(variantsStr).split(/[,|]/);
+              parts.forEach((p: string) => {
+                const kv = p.split(':');
+                if (kv.length === 2) {
+                  const size = kv[0].trim();
+                  const price = parseFloat(kv[1].trim()) || 0;
+                  if (size && price > 0) {
+                    variants.push({ size, price });
+                  }
+                }
+              });
+            }
+
+            return {
+              name: String(name).trim(),
+              price,
+              categoryGroup: String(category).trim(),
+              description: String(description).trim(),
+              variants,
+              image: `https://loremflickr.com/400/300/${encodeURIComponent(String(name || 'food').toLowerCase().replace(/ /g, '-'))},food`,
+              available: true,
+            };
+          }).filter(item => item.name);
+          
+          resolve(items);
+        } catch (error) {
+          console.error("Excel parsing failed:", error);
+          reject(error);
+        }
       };
-      reader.readAsBinaryString(file);
+      reader.onerror = (error) => reject(error);
+      reader.readAsArrayBuffer(file);
     });
+  };
+
+  const downloadSampleExcel = () => {
+    const sampleData = [
+      {
+        "Name": "Classic Margherita Pizza",
+        "Price": 299,
+        "Category": "Pizza",
+        "Description": "Fresh tomato sauce, mozzarella cheese, and basil leaves",
+        "Variants": "Regular: 299, Medium: 399, Large: 499"
+      },
+      {
+        "Name": "Spicy Chicken Burger",
+        "Price": 189,
+        "Category": "Burgers",
+        "Description": "Crispy chicken breast with spicy mayo, lettuce, and onions",
+        "Variants": "Single: 189, Double: 249"
+      },
+      {
+        "Name": "Mango Lassi",
+        "Price": 99,
+        "Category": "Beverages",
+        "Description": "Traditional sweet yogurt drink blended with mango pulp",
+        "Variants": ""
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(sampleData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Menu Sample");
+    
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const dataBlob = new Blob([excelBuffer], { type: 'application/octet-stream' });
+    
+    const url = window.URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'menu_import_sample.xlsx');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Sample Excel downloaded!");
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !uploadType) return;
 
-    let extracted: Partial<MenuItem>[] = [];
-    if (uploadType === 'image') extracted = await analyzeImage(file);
-    if (uploadType === 'excel') extracted = await analyzeExcel(file);
+    const toastId = toast.loading(`Uploading ${file.name}...`);
+    try {
+      let extracted: Partial<MenuItem>[] = [];
+      if (uploadType === 'image') {
+        toast.dismiss(toastId);
+        extracted = await analyzeImage(file);
+      } else if (uploadType === 'excel') {
+        extracted = await analyzeExcel(file);
+        if (extracted.length === 0) {
+          toast.error("No valid menu items found in the Excel sheet.", { id: toastId });
+        } else {
+          toast.success(`Successfully read ${extracted.length} items from Excel!`, { id: toastId });
+        }
+      }
 
-    if (extracted.length > 0) {
-      setReviewItems(extracted);
-      setIsReviewModalOpen(true);
+      if (extracted.length > 0) {
+        setReviewItems(extracted);
+        setIsReviewModalOpen(true);
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Import failed: ${err.message || "Unknown error"}`, { id: toastId });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setUploadType(null);
     }
-    
-    // Reset input
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    setUploadType(null);
   };
 
   const handleBulkAdd = async () => {
+    if (permissions && !permissions.menu.add) {
+      toast.error("You do not have permission to add menu items.");
+      return;
+    }
     if (!restaurantId) return;
     const toastId = toast.loading(`Adding ${reviewItems.length} items...`);
     try {
@@ -427,6 +537,10 @@ const MenuManager: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (permissions && !permissions.menu.delete) {
+      toast.error("You do not have permission to delete menu items.");
+      return;
+    }
     if (!restaurantId) return;
     try {
       await deleteDoc(doc(db, 'restaurants', restaurantId, 'menu', id));
@@ -439,6 +553,10 @@ const MenuManager: React.FC = () => {
   };
 
   const handleBulkDelete = async () => {
+    if (permissions && !permissions.menu.delete) {
+      toast.error("You do not have permission to delete menu items.");
+      return;
+    }
     if (!restaurantId || selectedItems.length === 0) return;
 
     const toastId = toast.loading(`Deleting ${selectedItems.length} items...`);
@@ -486,6 +604,13 @@ const MenuManager: React.FC = () => {
 
     return grouped;
   }, [items, filterCategoryGroup]);
+
+  const allAvailableCategories = React.useMemo(() => {
+    const defaults = ['Veg', 'Non-Veg', 'Drinks', 'Dessert'];
+    const custom = currentRestaurant?.customCategories || [];
+    const fromItems = items.map(i => i.categoryGroup).filter(Boolean) as string[];
+    return Array.from(new Set([...defaults, ...custom, ...fromItems])).sort();
+  }, [currentRestaurant?.customCategories, items]);
 
   const uniqueCategoryGroups = React.useMemo(() => {
     const menuCategories = Array.from(new Set(items.map(item => item.categoryGroup).filter(Boolean) as string[]));
@@ -562,6 +687,12 @@ const MenuManager: React.FC = () => {
                   className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600 flex items-center"
                 >
                   <BrainCircuit className="h-4 w-4 mr-2" /> Paste Menu Text
+                </button>
+                <button 
+                  onClick={() => { downloadSampleExcel(); setIsImportDropdownOpen(false); }}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-600 flex items-center border-t border-gray-100 font-medium"
+                >
+                  <Download className="h-4 w-4 mr-2 text-orange-500" /> Download Sample
                 </button>
               </div>
             )}
@@ -824,10 +955,7 @@ const MenuManager: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
-                          <input 
-                            type="text"
-                            list="custom-categories-list"
-                            placeholder="Select or type category"
+                          <select 
                             className="border border-gray-200 rounded-lg bg-white px-2 py-1 focus:ring-1 focus:ring-orange-500 text-sm text-gray-700"
                             value={item.categoryGroup}
                             onChange={(e) => {
@@ -835,12 +963,12 @@ const MenuManager: React.FC = () => {
                               newItems[idx].categoryGroup = e.target.value;
                               setReviewItems(newItems);
                             }}
-                          />
-                          <datalist id="custom-categories-list">
-                            {currentRestaurant?.customCategories?.map(cat => (
-                              <option key={cat} value={cat} />
+                          >
+                            <option value="" disabled>Select category</option>
+                            {allAvailableCategories.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
                             ))}
-                          </datalist>
+                          </select>
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -978,19 +1106,17 @@ const MenuManager: React.FC = () => {
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Type (Category)</label>
-                                <input 
-                                    type="text"
-                                    list="form-categories-list"
-                                    className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                                <select 
+                                    required
+                                    className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 bg-white"
                                     value={formData.categoryGroup}
                                     onChange={(e) => setFormData({...formData, categoryGroup: e.target.value})}
-                                    placeholder="Select or type category"
-                                />
-                                <datalist id="form-categories-list">
-                                    {currentRestaurant?.customCategories?.map(cat => (
-                                      <option key={cat} value={cat} />
+                                >
+                                    <option value="" disabled>Select category</option>
+                                    {allAvailableCategories.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
                                     ))}
-                                </datalist>
+                                </select>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹)</label>
@@ -1011,8 +1137,8 @@ const MenuManager: React.FC = () => {
                                 <input 
                                     type="text" 
                                     className="flex-1 rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
-                                    value={formData.categoryGroup}
-                                    onChange={(e) => setFormData({...formData, categoryGroup: e.target.value})}
+                                    value={newCategoryInput}
+                                    onChange={(e) => setNewCategoryInput(e.target.value)}
                                     placeholder="Enter new category name..."
                                 />
                                 <button 

@@ -4,15 +4,18 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'fire
 import { doc, getDoc, setDoc, collection, getDocs, limit, query } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import AuthLayout from '../layouts/AuthLayout';
-import { Loader2, Mail, Lock, ArrowRight, UserPlus } from 'lucide-react';
+import { Loader2, Mail, Lock, ArrowRight, UserPlus, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
 
 const Login: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,6 +23,21 @@ const Login: React.FC = () => {
 
     if (!email || !password) {
       toast.error("Please enter both email and password.");
+      setLoading(false);
+      return;
+    }
+
+    // Basic email validation regex
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      toast.error("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
+
+    // Minimum password length validation
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters long.");
       setLoading(false);
       return;
     }
@@ -83,6 +101,9 @@ const Login: React.FC = () => {
         }
       }
 
+      // Force AuthContext to update current user state with new profile details
+      await refreshProfile();
+
       // Routing
       if (userData?.role === 'admin' && userData.restaurantId) {
         navigate(`/dashboard/${userData.restaurantId}`);
@@ -90,7 +111,7 @@ const Login: React.FC = () => {
         navigate('/');
       }
 
-    } catch (err) {
+    } catch (err: any) {
       console.error("Auth Error:", err);
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         toast.error("Invalid email or password.");
@@ -148,13 +169,24 @@ const Login: React.FC = () => {
             <input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 sm:text-sm placeholder-gray-400 transition-colors"
+              className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 sm:text-sm placeholder-gray-400 transition-colors"
               placeholder="••••••••"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none cursor-pointer"
+            >
+              {showPassword ? (
+                <EyeOff className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <Eye className="h-5 w-5" aria-hidden="true" />
+              )}
+            </button>
           </div>
         </div>
 
@@ -162,7 +194,7 @@ const Login: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all"
+            className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-70 disabled:cursor-not-allowed transition-all cursor-pointer"
           >
             {loading ? (
               <Loader2 className="animate-spin -ml-1 mr-2 h-4 w-4" />
@@ -178,7 +210,7 @@ const Login: React.FC = () => {
           <button
             type="button"
             onClick={() => { setIsLogin(!isLogin); }}
-            className="text-sm font-medium text-orange-600 hover:text-orange-500"
+            className="text-sm font-medium text-orange-600 hover:text-orange-500 cursor-pointer"
           >
             {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
           </button>

@@ -21,7 +21,8 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
   const [showOnlinePayment, setShowOnlinePayment] = useState(false);
   
   // Order Configuration State
-  const [orderType, setOrderType] = useState<OrderType>('Dine-in');
+  const [orderType, setOrderType] = useState<OrderType>('Delivery');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
   const [defaultDeliveryCharge, setDefaultDeliveryCharge] = useState(0);
   const [restaurantName, setRestaurantName] = useState('Restaurant');
   const [upiId, setUpiId] = useState('');
@@ -38,23 +39,38 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
 
   // Success Modal Data
   const [lastOrderData, setLastOrderData] = useState<LastOrderDetails | null>(null);
+  
+  const [currency, setCurrency] = useState('₹');
 
   // 1. Fetch Restaurant Settings on Open
   useEffect(() => {
     const fetchSettings = async () => {
         if (!restaurantId) return;
         try {
+            // A. Fetch Basic Restaurant Document
             const docSnap = await getDoc(doc(db, 'restaurants', restaurantId));
+            let rData: any = {};
             if (docSnap.exists()) {
-                const data = docSnap.data() as Restaurant;
-                setDefaultDeliveryCharge(data.defaultDeliveryCharge || 0);
-                setRestaurantName(data.name || 'Restaurant');
-                setUpiId(data.upiId || '');
-                
-                if (data.taxSettings) {
-                    setTaxSettings(data.taxSettings);
-                }
+                rData = docSnap.data();
+            }
 
+            // B. Fetch Configuration Document
+            const configSnap = await getDoc(doc(db, 'restaurants', restaurantId, 'config', 'main'));
+            let cData: any = {};
+            if (configSnap.exists()) {
+                cData = configSnap.data();
+            }
+
+            // C. Merge Settings
+            const merged = { ...rData, ...cData };
+            
+            setDefaultDeliveryCharge(merged.defaultDeliveryCharge || 0);
+            setRestaurantName(merged.name || 'Restaurant');
+            setUpiId(merged.upiId || '');
+            setCurrency(merged.currency || '₹');
+            
+            if (merged.taxSettings) {
+                setTaxSettings(merged.taxSettings);
             }
         } catch (err) {
             console.error("Error fetching settings:", err);
@@ -79,7 +95,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
 
   // 3. Validation
   const isValidPhone = (phone: string) => /^\d{10}$/.test(phone.trim());
-  const isFormValid = guestName.trim() !== '' && isValidPhone(guestPhone);
+  const isFormValid = guestName.trim() !== '' && isValidPhone(guestPhone) && deliveryAddress.trim() !== '';
 
   const generateReceiptPDF = async () => {
       if (!lastOrderData) return;
@@ -158,7 +174,8 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
         paymentStatus: 'Pending', // BOTH Cash and Online orders set to Pending by default as requested
         createdAt: now,
         customerName: guestName, 
-        customerPhone: guestPhone
+        customerPhone: guestPhone,
+        deliveryAddress: deliveryAddress
       };
 
       const docRef = await addDoc(collection(db, 'restaurants', restaurantId, 'orders'), orderPayload);
@@ -218,7 +235,8 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
       setIsCheckingOut(false);
       setShowBillOverview(false);
       setShowOnlinePayment(false);
-      setOrderType('Dine-in'); 
+      setOrderType('Delivery'); 
+      setDeliveryAddress('');
       setGuestName('');
       setGuestPhone('');
       setPaymentMethod('Online'); // Reset payment method
@@ -261,25 +279,26 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
         if (docSnap.exists()) {
             const restaurantData = docSnap.data() as Restaurant;
             
-            const { 
-                total, items, id, formattedId, subtotal, taxDetails, upiUrl, paymentQrLink, customerName, customerPhone, paymentMethod
-            } = lastOrderData;
+             const { 
+                 total, items, id, formattedId, subtotal, taxDetails, upiUrl, paymentQrLink, customerName, customerPhone, paymentMethod
+             } = lastOrderData;
 
-            let message = `Hello ${customerName || 'Guest'}, your order from ${restaurantData.name} has been placed successfully!\n\n`;
-            message += `Order ID: ${formattedId || id.slice(0, 6)}\n\n`;
-            message += `Items:\n`;
-            items.forEach(item => {
-                message += `- ${item.quantity}x ${item.name}${item.selectedVariant ? ` (${item.selectedVariant.size})` : ''} (₹${((item.selectedVariant?.price || item.price) * item.quantity).toFixed(2)})\n`;
-            });
-            message += `\nSubtotal: ₹${subtotal.toFixed(2)}\n`;
-            if (taxDetails.gstAmount > 0) {
-              message += `GST (${taxDetails.gstRate}%): ₹${taxDetails.gstAmount.toFixed(2)}\n`;
-            }
-            if (taxDetails.serviceAmount > 0) {
-              message += `Service Charge: ₹${taxDetails.serviceAmount.toFixed(2)}\n`;
-            }
-            message += `Grand Total: ₹${total.toFixed(2)}\n\n`;
-            message += `Payment Method: ${paymentMethod}\n`;
+             const currencySymbol = restaurantData?.currency || '₹';
+             let message = `Hello ${customerName || 'Guest'}, your order from ${restaurantData.name} has been placed successfully!\n\n`;
+             message += `Order ID: ${formattedId || id.slice(0, 6)}\n\n`;
+             message += `Items:\n`;
+             items.forEach(item => {
+                 message += `- ${item.quantity}x ${item.name}${item.selectedVariant ? ` (${item.selectedVariant.size})` : ''} (${currencySymbol}${((item.selectedVariant?.price || item.price) * item.quantity).toFixed(2)})\n`;
+             });
+             message += `\nSubtotal: ${currencySymbol}${subtotal.toFixed(2)}\n`;
+             if (taxDetails.gstAmount > 0) {
+               message += `GST (${taxDetails.gstRate}%): ${currencySymbol}${taxDetails.gstAmount.toFixed(2)}\n`;
+             }
+             if (taxDetails.serviceAmount > 0) {
+               message += `Service Charge: ${currencySymbol}${taxDetails.serviceAmount.toFixed(2)}\n`;
+             }
+             message += `Grand Total: ${currencySymbol}${total.toFixed(2)}\n\n`;
+             message += `Payment Method: ${paymentMethod}\n`;
 
             if (paymentMethod === 'Online') {
                 if (upiUrl) {
@@ -315,7 +334,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">Order Confirmed!</h3>
                 <p className="text-gray-500 text-sm mb-6">
                     Your order #{lastOrderData.formattedId || lastOrderData.id.slice(0,6)} has been received. 
-                    <br/>Total: <span className="font-bold text-gray-900 font-mono">₹{lastOrderData.total.toFixed(2)}</span>
+                    <br/>Total: <span className="font-bold text-gray-900 font-mono">{currency}{lastOrderData.total.toFixed(2)}</span>
                 </p>
                 <div className="space-y-3 mb-3">
                     <button 
@@ -357,7 +376,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden text-center p-8">
             <h3 className="text-xl font-bold text-gray-900 mb-2">Scan to Pay</h3>
-            <p className="text-gray-500 text-sm mb-6">Pay ₹{finalTotal.toFixed(2)} to {restaurantName}</p>
+            <p className="text-gray-500 text-sm mb-6">Pay {currency}{finalTotal.toFixed(2)} to {restaurantName}</p>
             
             <div className="bg-white p-4 rounded-xl border-2 border-dashed border-gray-200 inline-block mb-4">
               <a href={upiUrl} className="block">
@@ -404,7 +423,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
               {items.map((item, idx) => (
                 <div key={idx} className="flex justify-between text-sm">
                   <span className="text-gray-600">{item.quantity}x {item.name}</span>
-                  <span className="font-bold text-gray-900">₹{((item.selectedVariant?.price || item.price) * item.quantity).toFixed(0)}</span>
+                  <span className="font-bold text-gray-900">{currency}{((item.selectedVariant?.price || item.price) * item.quantity).toFixed(0)}</span>
                 </div>
               ))}
             </div>
@@ -412,29 +431,29 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
             <div className="space-y-2 pt-4 border-t border-dashed border-gray-200 mb-6">
               <div className="flex justify-between text-sm text-gray-500">
                 <span>Subtotal</span>
-                <span>₹{totalPrice.toFixed(2)}</span>
+                <span>{currency}{totalPrice.toFixed(2)}</span>
               </div>
-              {deliveryFee > 0 && (
+              {deliveryFee >= 0 && (
                 <div className="flex justify-between text-sm text-gray-900 font-bold">
                   <span>Delivery Fee</span>
-                  <span>₹{deliveryFee.toFixed(2)}</span>
+                  <span>{currency}{deliveryFee.toFixed(2)}</span>
                 </div>
               )}
               {gstAmount > 0 && (
                 <div className="flex justify-between text-sm text-gray-500">
                   <span>GST ({taxSettings.gstPercentage}%)</span>
-                  <span>₹{gstAmount.toFixed(2)}</span>
+                  <span>{currency}{gstAmount.toFixed(2)}</span>
                 </div>
               )}
               {serviceAmount > 0 && (
                 <div className="flex justify-between text-sm text-gray-500">
                   <span>Service Charge ({taxSettings.serviceChargePercentage}%)</span>
-                  <span>₹{serviceAmount.toFixed(2)}</span>
+                  <span>{currency}{serviceAmount.toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between text-lg font-extrabold text-gray-900 pt-2 border-t border-gray-100">
                 <span>Total Payable</span>
-                <span>₹{finalTotal.toFixed(2)}</span>
+                <span>{currency}{finalTotal.toFixed(2)}</span>
               </div>
             </div>
 
@@ -500,7 +519,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                     {/* Info */}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-gray-900 line-clamp-1">{item.name} {item.selectedVariant && <span className="text-[10px] text-orange-600">({item.selectedVariant.size})</span>}</p>
-                      <p className="text-xs text-gray-500 font-medium">₹{(item.selectedVariant?.price || item.price).toFixed(2)}</p>
+                      <p className="text-xs text-gray-500 font-medium">{currency}{(item.selectedVariant?.price || item.price).toFixed(2)}</p>
                     </div>
 
                     {/* Controls */}
@@ -511,7 +530,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                           <button onClick={() => updateQuantity(item.cartItemId, 1)} className="w-6 h-6 flex items-center justify-center rounded bg-white shadow-sm text-green-600 hover:text-green-700"><Plus className="h-3 w-3" /></button>
                        </div>
                        <div className="flex flex-col items-end min-w-[4rem]">
-                          <span className="text-sm font-bold text-gray-900">₹{((item.selectedVariant?.price || item.price) * item.quantity).toFixed(0)}</span>
+                          <span className="text-sm font-bold text-gray-900">{currency}{((item.selectedVariant?.price || item.price) * item.quantity).toFixed(0)}</span>
                           <button 
                             onClick={() => removeItem(item.cartItemId)} 
                             className="text-gray-400 hover:text-red-500 transition-colors mt-1 p-1 hover:bg-red-50 rounded"
@@ -553,22 +572,15 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                         </div>
                    </div>
 
-                    <div className="flex bg-gray-100 p-1 rounded-lg mb-4">
-                        {['Dine-in', 'Takeaway', 'Delivery'].map(type => (
-                            <button 
-                                key={type}
-                                onClick={() => setOrderType(type as OrderType)}
-                                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all flex items-center justify-center ${
-                                    orderType === type 
-                                    ? 'bg-white text-[#FF5722] shadow-sm' 
-                                    : 'text-gray-500 hover:text-gray-700'
-                                }`}
-                            >
-                                {type === 'Dine-in' && <Utensils className="h-3 w-3 mr-1"/>}
-                                {type !== 'Dine-in' && <Bike className="h-3 w-3 mr-1"/>}
-                                {type}
-                            </button>
-                        ))}
+                    <div className="relative">
+                        <textarea 
+                            placeholder="Enter Complete Delivery Address..."
+                            value={deliveryAddress}
+                            onChange={(e) => setDeliveryAddress(e.target.value)}
+                            rows={2}
+                            required
+                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-1 focus:ring-[#FF5722] outline-none resize-none"
+                        />
                     </div>
 
                     {/* Payment Method Selection - Website orders are Online Only */}
@@ -584,27 +596,27 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                 <div className="space-y-1.5 pt-4 border-t border-dashed border-gray-200 mb-4">
                     <div className="flex justify-between text-xs text-gray-500">
                         <span>Subtotal</span>
-                        <span className="font-mono text-right w-20">₹{totalPrice.toFixed(2)}</span>
+                        <span className="font-mono text-right w-20">{currency}{totalPrice.toFixed(2)}</span>
                     </div>
-                    {deliveryFee > 0 && (
+                    {deliveryFee >= 0 && (
                         <div className="flex justify-between text-xs text-gray-900 font-bold">
                             <span>Delivery Fee</span>
-                            <span className="font-mono text-right w-20">₹{deliveryFee.toFixed(2)}</span>
+                            <span className="font-mono text-right w-20">{currency}{deliveryFee.toFixed(2)}</span>
                         </div>
                     )}
                     <div className="flex justify-between text-xs text-gray-500">
                         <span>GST ({gstPercentage}%)</span>
-                        <span className="font-mono text-right w-20">₹{gstAmount.toFixed(2)}</span>
+                        <span className="font-mono text-right w-20">{currency}{gstAmount.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-xs text-gray-500">
                         <span>Service Charge ({serviceChargePercentage}%)</span>
-                        <span className="font-mono text-right w-20">₹{serviceAmount.toFixed(2)}</span>
+                        <span className="font-mono text-right w-20">{currency}{serviceAmount.toFixed(2)}</span>
                     </div>
                 </div>
 
                 <div className="flex justify-between items-end mb-4 pt-2 border-t border-gray-100">
                     <span className="text-sm font-bold text-gray-800">Total Payable</span>
-                    <span className="text-2xl font-extrabold text-gray-900 tracking-tight font-mono text-right">₹{finalTotal.toFixed(2)}</span>
+                    <span className="text-2xl font-extrabold text-gray-900 tracking-tight font-mono text-right">{currency}{finalTotal.toFixed(2)}</span>
                 </div>
 
                 <button 
@@ -631,7 +643,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                     <>
                         <span>Confirm Order</span>
                         <span className="flex items-center text-orange-100 text-sm">
-                        ₹{finalTotal.toFixed(2)} <ArrowRight className="ml-2 h-4 w-4" />
+                        {currency}{finalTotal.toFixed(2)} <ArrowRight className="ml-2 h-4 w-4" />
                         </span>
                     </>
                     )}

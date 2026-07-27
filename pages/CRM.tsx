@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, getDocs } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useRestaurants } from '../context/RestaurantContext';
 import { Order } from '../types';
-import { MessageSquare, Download, Phone, TrendingUp, Award, AlertCircle, Send, X, Search, Filter, Calendar, List, DollarSign, Users, Activity, Loader2, Clock, QrCode } from 'lucide-react';
+import { MessageSquare, Download, Phone, TrendingUp, Award, AlertCircle, Send, X, Search, Filter, Calendar, List, DollarSign, Users, Activity, Loader2, Clock, QrCode, Plus } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-hot-toast';
@@ -31,15 +31,46 @@ type TabType = 'spending' | 'frequency' | 'inactive';
 const CRM: React.FC = () => {
   const { restaurantId } = useParams<{ restaurantId: string }>();
   const { selectedRestaurant: currentRestaurant } = useRestaurants();
+  const [restaurantName, setRestaurantName] = useState<string>('Export');
   const [customers, setCustomers] = useState<CustomerData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!restaurantId) return;
+    const fetchRestaurantName = async () => {
+      try {
+        const docRef = doc(db, 'restaurants', restaurantId);
+        const snapshot = await getDoc(docRef);
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          if (data && data.name) {
+            setRestaurantName(data.name);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch restaurant details:", err);
+      }
+    };
+    fetchRestaurantName();
+  }, [restaurantId]);
   
   // Tabs & Filters
   const [activeTab, setActiveTab] = useState<TabType>('spending');
   const [searchQuery, setSearchQuery] = useState("");
   const [favoriteItemFilter, setFavoriteItemFilter] = useState("All");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
+  
+  // Pagination & Export States
+  const [visibleCustomersCount, setVisibleCustomersCount] = useState(20);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportRangeType, setExportRangeType] = useState<string>('all-time');
+  const [exportCustomStart, setExportCustomStart] = useState<string>('');
+  const [exportCustomEnd, setExportCustomEnd] = useState<string>('');
+
+  useEffect(() => {
+    setVisibleCustomersCount(20);
+  }, [activeTab, searchQuery, favoriteItemFilter, dateRange]);
   
   // Modals & Messaging
   const [showBulkModal, setShowBulkModal] = useState(false);
@@ -361,7 +392,7 @@ const CRM: React.FC = () => {
 
   const openCustomMessageModal = (customer: CustomerData) => {
     setTargetCustomer(customer);
-    setCustomMessage(`Hello ${customer.name}, we have a special surprise for you at ${currentRestaurant?.name || 'our restaurant'}!`);
+    setCustomMessage(`Hello ${customer.name}, we have a special surprise for you at ${currentRestaurant?.name || restaurantName || 'our restaurant'}!`);
     setShowCustomModal(true);
   };
 
@@ -438,12 +469,61 @@ const CRM: React.FC = () => {
   };
 
   const exportToExcel = () => {
-    if (customers.length === 0) {
-      toast.error("No customers to export");
+    if (filteredCustomers.length === 0) {
+      toast.error("No customers in the current list to export");
+      return;
+    }
+    setShowExportModal(true);
+  };
+
+  const triggerExcelExport = () => {
+    let exportFiltered = filteredCustomers;
+    const now = new Date();
+
+    if (exportRangeType !== 'all-time') {
+      let cutoff: Date | null = null;
+      if (exportRangeType === '1-week') {
+        cutoff = new Date();
+        cutoff.setDate(now.getDate() - 7);
+      } else if (exportRangeType === '1-month') {
+        cutoff = new Date();
+        cutoff.setDate(now.getDate() - 30);
+      } else if (exportRangeType === '3-months') {
+        cutoff = new Date();
+        cutoff.setDate(now.getDate() - 90);
+      } else if (exportRangeType === '6-months') {
+        cutoff = new Date();
+        cutoff.setDate(now.getDate() - 180);
+      } else if (exportRangeType === '1-year') {
+        cutoff = new Date();
+        cutoff.setDate(now.getDate() - 365);
+      }
+
+      if (cutoff) {
+        cutoff.setHours(0, 0, 0, 0);
+        exportFiltered = exportFiltered.filter(c => new Date(c.lastOrderedAt) >= cutoff!);
+      } else if (exportRangeType === 'custom') {
+        if (!exportCustomStart || !exportCustomEnd) {
+          toast.error("Please select both start and end dates for custom export");
+          return;
+        }
+        const start = new Date(exportCustomStart);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(exportCustomEnd);
+        end.setHours(23, 59, 59, 999);
+        exportFiltered = exportFiltered.filter(c => {
+          const lastVisit = new Date(c.lastOrderedAt);
+          return lastVisit >= start && lastVisit <= end;
+        });
+      }
+    }
+
+    if (exportFiltered.length === 0) {
+      toast.error("No customer records found for the selected date range");
       return;
     }
 
-    const exportData = customers.map(c => ({
+    const exportData = exportFiltered.map(c => ({
       Name: c.name,
       Phone: c.phone,
       'Total Orders': Number(c.totalOrders) || 0,
@@ -456,8 +536,36 @@ const CRM: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Customers");
-    XLSX.writeFile(wb, `Customers_${currentRestaurant?.name || 'Export'}_${new Date().toISOString().split('T')[0]}.xlsx`);
-    toast.success("Customers exported successfully");
+    
+    const rawRestaurantName = currentRestaurant?.name || restaurantName;
+    const safeRestaurantName = rawRestaurantName.replace(/[^a-zA-Z0-9\-_]/g, '_').trim();
+    const segmentName = activeTab === 'spending' ? 'Spending' : activeTab === 'frequency' ? 'Frequency' : 'Inactive';
+    const filename = `Customers_${segmentName}_${safeRestaurantName}_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    try {
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+      const url = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + wbout;
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Clean up link after click
+      setTimeout(() => {
+        if (document.body.contains(a)) {
+          document.body.removeChild(a);
+        }
+      }, 1000);
+      
+      toast.success("Customers exported successfully");
+    } catch (err) {
+      console.error("Export failed:", err);
+      toast.error("Failed to generate Excel download");
+    }
+    
+    setShowExportModal(false);
   };
 
   if (loading) return <div className="p-4 text-center">Loading customers...</div>;
@@ -484,7 +592,7 @@ const CRM: React.FC = () => {
             </div>
           </div>
           <p className="text-sm text-gray-500 flex items-center">
-            <Users className="h-4 w-4 mr-1" /> Managing {customers.length} customers for <span className="font-bold text-orange-600 ml-1">{currentRestaurant?.name}</span>
+            <Users className="h-4 w-4 mr-1" /> Managing {customers.length} customers for <span className="font-bold text-orange-600 ml-1">{currentRestaurant?.name || restaurantName}</span>
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -784,7 +892,7 @@ const CRM: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filteredCustomers.map((customer) => {
+              {filteredCustomers.slice(0, visibleCustomersCount).map((customer) => {
                 const status = getStatusLabel(customer);
                 return (
                   <tr key={customer.id} className="hover:bg-gray-50/50 transition-colors">
@@ -853,6 +961,96 @@ const CRM: React.FC = () => {
           </div>
         )}
       </div>
+
+      {filteredCustomers.length > visibleCustomersCount && (
+        <div className="flex justify-center mt-6 mb-4">
+          <button
+            onClick={() => setVisibleCustomersCount(prev => prev + 20)}
+            className="px-6 py-2.5 bg-white text-[#FF5722] hover:bg-orange-50 border border-orange-200 rounded-xl text-sm font-bold shadow-sm hover:shadow transition flex items-center gap-1.5"
+          >
+            <Plus className="h-4 w-4" /> Load More Customers ({filteredCustomers.length - visibleCustomersCount} remaining)
+          </button>
+        </div>
+      )}
+
+      {/* Export Range Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 animate-fade-in">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Export Customers to Excel</h3>
+              <button onClick={() => setShowExportModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-100 text-xs">
+              <span className="font-bold text-orange-800">Exporting Segment: </span>
+              <span className="font-semibold text-gray-700 capitalize">
+                {activeTab === 'spending' ? 'Spending' : activeTab === 'frequency' ? 'Frequency' : 'Inactive'}
+              </span>
+              <div className="text-[10px] text-gray-500 mt-1">
+                This will export customers matching the active filters on this tab.
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">Select Export Timeframe</label>
+              <select
+                value={exportRangeType}
+                onChange={(e) => setExportRangeType(e.target.value)}
+                className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
+              >
+                <option value="all-time">All Time</option>
+                <option value="1-week">Last 7 Days (1 Week)</option>
+                <option value="1-month">Last 30 Days (1 Month)</option>
+                <option value="3-months">Last 90 Days (3 Months)</option>
+                <option value="6-months">Last 180 Days (6 Months)</option>
+                <option value="1-year">Last 365 Days (1 Year)</option>
+                <option value="custom">Custom Date Range</option>
+              </select>
+            </div>
+
+            {exportRangeType === 'custom' && (
+              <div className="grid grid-cols-2 gap-3 mb-5 animate-fade-in">
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">Start Date</label>
+                  <input
+                    type="date"
+                    value={exportCustomStart}
+                    onChange={(e) => setExportCustomStart(e.target.value)}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs focus:ring-orange-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 mb-1 uppercase">End Date</label>
+                  <input
+                    type="date"
+                    value={exportCustomEnd}
+                    onChange={(e) => setExportCustomEnd(e.target.value)}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs focus:ring-orange-500 outline-none"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowExportModal(false)}
+                className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 transition"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={triggerExcelExport}
+                className="flex-1 py-2.5 bg-orange-600 text-white rounded-lg text-sm font-bold hover:bg-orange-700 transition flex items-center justify-center"
+              >
+                <Download className="h-4 w-4 mr-2" /> Export
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

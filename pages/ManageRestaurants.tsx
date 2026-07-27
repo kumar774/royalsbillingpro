@@ -17,7 +17,7 @@ const ManageRestaurants: React.FC = () => {
     location: '',
     logo: 'https://picsum.photos/seed/restaurant/100/100',
     bannerImage: 'https://picsum.photos/seed/banner/1200/400',
-    // rating: 5.0,
+    isActive: true,
     socialLinks: {
         instagram: '',
         facebook: '',
@@ -25,7 +25,7 @@ const ManageRestaurants: React.FC = () => {
     } as SocialLinks
   });
 
-useEffect(() => {
+  useEffect(() => {
     if (editId) {
         const fetchRestaurant = async () => {
             const docRef = doc(db, 'restaurants', editId);
@@ -54,7 +54,7 @@ useEffect(() => {
                     location: data.location,
                     logo: data.logo,
                     bannerImage: data.bannerImage,
-                    // rating: data.rating,
+                    isActive: data.isActive !== undefined ? data.isActive : true,
                     socialLinks: socialLinks
                 });
             }
@@ -76,11 +76,9 @@ useEffect(() => {
         slug: slug,
         cuisine: formData.cuisine.split(',').map(c => c.trim()),
         location: formData.location,
-        // rating: formData.rating,
         bannerImage: formData.bannerImage,
         logo: formData.logo,
-        // openingHours: '09:00 AM - 10:00 PM',
-        // socialMedia removed from main doc
+        isActive: formData.isActive
       };
 
       let targetId = editId;
@@ -129,17 +127,22 @@ useEffect(() => {
     }
   };
 
+  const generatedSlug = formData.name
+    ? formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+    : 'your-restaurant-name';
+
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto pb-10">
       <div className="mb-8">
-        <h2 className="text-2xl font-bold text-gray-900">{editId ? 'Edit Restaurant' : 'Add New Restaurant'}</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{editId ? 'Edit Restaurant Profile' : 'Add New Restaurant'}</h2>
         <p className="text-gray-500">{editId ? 'Update existing restaurant details.' : 'Create a new restaurant profile to manage.'}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-             <Building2 className="h-5 w-5 mr-2 text-gray-400" /> Basic Details
+        {/* Basic Details */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
+          <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
+             <Building2 className="h-5 w-5 mr-2 text-orange-500" /> Basic Details
           </h3>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -148,11 +151,15 @@ useEffect(() => {
               <input 
                 type="text" 
                 required
-                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                 placeholder="e.g. Burger King"
                 value={formData.name}
                 onChange={e => setFormData({...formData, name: e.target.value})}
               />
+              <p className="text-xs text-orange-600 mt-1.5 font-bold flex items-center gap-1">
+                <span>Public Link:</span>
+                <span className="bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100 font-mono">#/restaurant/{generatedSlug}</span>
+              </p>
             </div>
             
             <div>
@@ -160,7 +167,7 @@ useEffect(() => {
               <input 
                 type="text" 
                 required
-                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                 placeholder="e.g. Fast Food, Burgers, American"
                 value={formData.cuisine}
                 onChange={e => setFormData({...formData, cuisine: e.target.value})}
@@ -172,63 +179,108 @@ useEffect(() => {
               <input 
                 type="text" 
                 required
-                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                 placeholder="e.g. 123 Main St, New York"
                 value={formData.location}
                 onChange={e => setFormData({...formData, location: e.target.value})}
               />
             </div>
+
+            {/* Is Active Status Switch */}
+            <div className="flex items-center pt-6">
+              <label className="flex items-center cursor-pointer">
+                <input 
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={formData.isActive}
+                  onChange={(e) => setFormData({...formData, isActive: e.target.checked})}
+                />
+                <div className="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                <span className="ms-3 text-sm font-bold text-gray-700">Publish Restaurant (Is Active)</span>
+              </label>
+            </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-             <ImageIcon className="h-5 w-5 mr-2 text-gray-400" /> Branding
+        {/* Branding & Image Previews */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
+           <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
+             <ImageIcon className="h-5 w-5 mr-2 text-orange-500" /> Branding & Previews
            </h3>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700">Logo Image URL</label>
                 <input 
                   type="text" 
                   required
-                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                   value={formData.logo}
                   onChange={e => setFormData({...formData, logo: e.target.value})}
                 />
+                {formData.logo && (
+                  <div className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-200 w-fit">
+                    <img 
+                      src={formData.logo} 
+                      alt="Logo preview" 
+                      className="h-14 w-14 rounded-full object-cover border border-gray-300 bg-white" 
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                    />
+                    <div className="text-left">
+                      <span className="text-xs font-bold text-gray-500 block">Logo Image Preview</span>
+                      <span className="text-[10px] text-gray-400">Loads dynamically from link</span>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Banner Image URL</label>
+
+              <div className="space-y-3">
+                <label className="block text-sm font-medium text-gray-700">Banner Image URL</label>
                 <input 
                   type="text" 
                   required
-                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                   value={formData.bannerImage}
                   onChange={e => setFormData({...formData, bannerImage: e.target.value})}
                 />
+                {formData.bannerImage && (
+                  <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 space-y-1">
+                    <img 
+                      src={formData.bannerImage} 
+                      alt="Banner preview" 
+                      className="h-20 w-full rounded-lg object-cover border border-gray-300 bg-white" 
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                    />
+                    <div className="flex justify-between items-center text-[10px] text-gray-400 font-bold">
+                      <span>Banner Image Preview</span>
+                      <span>1200x400 Ratio recommended</span>
+                    </div>
+                  </div>
+                )}
               </div>
            </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-           <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-             <Share2 className="h-5 w-5 mr-2 text-gray-400" /> Menu Page Social Links
+        {/* Social Media Links */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
+           <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
+             <Share2 className="h-5 w-5 mr-2 text-orange-500" /> Menu Page Social Links
            </h3>
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instagram URL</label>
                 <input 
                   type="text" 
-                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                   placeholder="https://instagram.com/..."
                   value={formData.socialLinks.instagram || ''}
                   onChange={e => setFormData({...formData, socialLinks: {...formData.socialLinks, instagram: e.target.value}})}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Facebook</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Facebook URL</label>
                 <input 
                   type="text" 
-                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                   placeholder="https://facebook.com/..."
                   value={formData.socialLinks.facebook || ''}
                   onChange={e => setFormData({...formData, socialLinks: {...formData.socialLinks, facebook: e.target.value}})}
@@ -238,7 +290,7 @@ useEffect(() => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Twitter/X URL</label>
                 <input 
                   type="text" 
-                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500"
+                  className="w-full rounded-lg border-gray-300 border px-3 py-2 text-sm focus:ring-orange-500 focus:border-orange-500 outline-none"
                   placeholder="https://twitter.com/..."
                   value={formData.socialLinks.twitter || ''}
                   onChange={e => setFormData({...formData, socialLinks: {...formData.socialLinks, twitter: e.target.value}})}
@@ -251,7 +303,7 @@ useEffect(() => {
            <button
              type="submit"
              disabled={loading}
-             className="flex items-center bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-8 rounded-xl transition shadow-lg shadow-orange-200 disabled:opacity-70"
+             className="flex items-center bg-orange-600 hover:bg-orange-700 text-white font-medium py-3 px-8 rounded-xl transition shadow-lg shadow-orange-200 disabled:opacity-70 cursor-pointer"
            >
              {loading ? (
                 <>

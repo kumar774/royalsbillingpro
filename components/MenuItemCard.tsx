@@ -67,7 +67,7 @@ const MenuItemCard: React.FC<MenuItemCardProps> = ({ item, restaurantId, onSelec
           <h3 className="font-bold text-gray-900 mt-2 text-sm">{item.name}</h3>
           <div className="font-semibold text-gray-700 mt-1">₹{item.price.toFixed(2)}</div>
           
-          {item.rating && (
+          {typeof item.rating === 'number' && item.rating > 0 && (
             <div className="flex items-center mt-1">
                <div className="flex text-xs text-yellow-500">
                  {[...Array(5)].map((_, i) => (

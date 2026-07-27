@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, increment, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { MenuItem, CartItem, OrderType, Restaurant, PaymentMethod, Variant, Order, TaxSettings } from '../types';
+import { MenuItem, CartItem, OrderType, Restaurant, PaymentMethod, Variant, Order, TaxSettings, RolePermissions } from '../types';
 import { Search, Plus, Minus, Trash2, CreditCard, Loader2, Printer, MessageSquare, CheckCircle, User, Phone, Wallet, QrCode, Tag, X, Bike, Utensils, ShoppingBag, Receipt, Copy, Download } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'react-hot-toast';
 import { generateProfessionalReceipt } from '../components/ReceiptPDF';
 import { Edit2 } from 'lucide-react';
-import { sendTelegramMessage, formatOrderMessage } from '../services/telegramService';
+import { sendTelegramMessage, formatOrderMessage, escapeHtml } from '../services/telegramService';
 
 
 interface LastOrderDetails {
@@ -36,7 +36,11 @@ interface LastOrderDetails {
   paymentQrLink: string;
 }
 
-const POS: React.FC = () => {
+interface POSProps {
+  permissions?: RolePermissions;
+}
+
+const POS: React.FC<POSProps> = ({ permissions }) => {
   const { restaurantId } = useParams<{ restaurantId: string }>();
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -52,6 +56,17 @@ const POS: React.FC = () => {
   // Admin Order Inputs
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [customerStats, setCustomerStats] = useState<{
+    weeklyVisits: number;
+    weeklySpend: number;
+    monthlyVisits: number;
+    monthlySpend: number;
+    totalVisits: number;
+    totalSpend: number;
+    isNewCustomer: boolean;
+  } | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
   const [orderType, setOrderType] = useState<OrderType>('Dine-in');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [discount, setDiscount] = useState<string>(''); 
@@ -63,15 +78,16 @@ const POS: React.FC = () => {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [tempCategoryOrder, setTempCategoryOrder] = useState<string[]>([]);
   const [showImages, setShowImages] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(10);
 
   const printReceipt = async (order: LastOrderDetails) => {
     if (!restaurantData) return;
-    generateProfessionalReceipt(order, restaurantData, 'print');
+    await generateProfessionalReceipt(order, restaurantData, 'print');
   };
 
   const downloadReceipt = async (order: LastOrderDetails) => {
     if (!restaurantData) return;
-    generateProfessionalReceipt(order, restaurantData, 'download');
+    await generateProfessionalReceipt(order, restaurantData, 'download');
   };
   
   // Active Restaurant Settings
@@ -109,13 +125,10 @@ const POS: React.FC = () => {
                 }
 
                 // Merge config data into restaurantData to ensure UPI and other settings are up to date
-                setRestaurantData(prev => {
-                    if (!prev) return null;
-                    return {
-                        ...prev,
-                        ...configData
-                    };
-                });
+                setRestaurantData(prev => ({
+                    ...(prev || {} as Restaurant),
+                    ...configData
+                }));
             }
         });
 
@@ -175,6 +188,83 @@ const POS: React.FC = () => {
     }
     setFilteredItems(result);
   }, [activeCategoryGroup, searchTerm, menuItems]);
+
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [activeCategoryGroup, searchTerm]);
+
+  useEffect(() => {
+    const fetchCustomerHistory = async () => {
+      const phoneDigits = customerPhone.trim();
+      if (!restaurantId || phoneDigits.length !== 10 || !/^\d{10}$/.test(phoneDigits)) {
+        setCustomerStats(null);
+        return;
+      }
+
+      setLoadingStats(true);
+      try {
+        const ordersRef = collection(db, 'restaurants', restaurantId, 'orders');
+        const q = query(ordersRef, where('customerPhone', '==', phoneDigits));
+        const querySnapshot = await getDocs(q);
+
+        let wVisits = 0;
+        let wSpend = 0;
+        let mVisits = 0;
+        let mSpend = 0;
+        let tVisits = 0;
+        let tSpend = 0;
+
+        const now = new Date();
+
+        // Start of current week (Monday at 00:00:00 local time)
+        const startOfWeek = new Date(now);
+        const day = startOfWeek.getDay();
+        const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
+        startOfWeek.setDate(diff);
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        // Start of current month (1st of month at 00:00:00 local time)
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+
+        querySnapshot.forEach((docSnap) => {
+          const order = docSnap.data() as Order;
+          if (order.status !== 'Cancelled') {
+            const orderDate = new Date(order.createdAt);
+            const orderTotal = Number(order.total) || 0;
+
+            tVisits += 1;
+            tSpend += orderTotal;
+
+            if (orderDate >= startOfWeek) {
+              wVisits += 1;
+              wSpend += orderTotal;
+            }
+
+            if (orderDate >= startOfMonth) {
+              mVisits += 1;
+              mSpend += orderTotal;
+            }
+          }
+        });
+
+        setCustomerStats({
+          weeklyVisits: wVisits,
+          weeklySpend: wSpend,
+          monthlyVisits: mVisits,
+          monthlySpend: mSpend,
+          totalVisits: tVisits,
+          totalSpend: tSpend,
+          isNewCustomer: tVisits === 0
+        });
+      } catch (err) {
+        console.error("Error fetching customer stats:", err);
+      } finally {
+        setLoadingStats(false);
+      }
+    };
+
+    fetchCustomerHistory();
+  }, [customerPhone, restaurantId]);
 
   const handleSelectVariant = (item: MenuItem) => {
     setSelectedItemForVariants(item);
@@ -238,6 +328,8 @@ const POS: React.FC = () => {
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
+      setDeliveryAddress('');
+      setCustomerStats(null);
       setOrderType('Dine-in');
       setPaymentMethod('Cash');
       setDiscount('');
@@ -246,8 +338,17 @@ const POS: React.FC = () => {
       setLastOrderDetails(null);
   };
 
-  const isValidPhone = (phone: string) => /^\d{10}$/.test(phone.trim());
-  const isFormValid = customerName.trim() !== '' && isValidPhone(customerPhone);
+  const isValidPhone = (phone: string) => {
+    const trimmed = phone.trim();
+    if (orderType === 'Delivery') {
+      return /^\d{10}$/.test(trimmed);
+    }
+    return trimmed === '' || /^\d{10}$/.test(trimmed);
+  };
+
+  const isFormValid = 
+    isValidPhone(customerPhone) && 
+    (orderType !== 'Delivery' || deliveryAddress.trim() !== '');
 
   // --- BILL CALCULATION LOGIC ---
   const calculateBill = () => {
@@ -290,11 +391,29 @@ const POS: React.FC = () => {
   const { subtotal, discountAmount, gstAmount, serviceAmount, total, gstRate, serviceRate, activeDeliveryCharge } = calculateBill();
 
   const handlePlaceOrder = async () => {
+    if (permissions && !permissions.pos.add) {
+      toast.error("You do not have permission to place orders.");
+      return;
+    }
     if (cart.length === 0) return;
     
     if (!isFormValid) {
-        toast.error("Please enter a valid Name and 10-digit Phone Number.");
-        return;
+      if (orderType === 'Delivery') {
+        if (!/^\d{10}$/.test(customerPhone.trim())) {
+          toast.error("Please enter a valid 10-digit Phone Number for Delivery.");
+          return;
+        }
+        if (deliveryAddress.trim() === '') {
+          toast.error("Please enter a Delivery Address.");
+          return;
+        }
+      } else {
+        if (customerPhone.trim() !== '' && !/^\d{10}$/.test(customerPhone.trim())) {
+          toast.error("Please enter a valid 10-digit Phone Number.");
+          return;
+        }
+      }
+      return;
     }
 
     if (!restaurantId) {
@@ -347,7 +466,9 @@ const POS: React.FC = () => {
             createdAt: new Date().toISOString(),
             tableNo: orderType === 'Dine-in' ? 'Walk-in' : 'N/A',
             customerName: customerName || 'Guest',
-            customerPhone: customerPhone || 'N/A'
+            customerPhone: customerPhone || 'N/A',
+            deliveryAddress: orderType === 'Delivery' ? deliveryAddress : '',
+            isNewCustomer: customerPhone.trim() !== '' && customerStats ? customerStats.isNewCustomer : false
           };
 
       const docRef = await addDoc(collection(db, 'restaurants', restaurantId, 'orders'), orderData);
@@ -398,12 +519,16 @@ const POS: React.FC = () => {
           createdAt: orderData.createdAt,
           taxDetails: { gstRate, gstAmount, serviceRate, serviceAmount },
           restaurantIds: [restaurantId],
-          paymentQrLink: paymentQrLink
+          paymentQrLink: paymentQrLink,
+          deliveryAddress: orderType === 'Delivery' ? deliveryAddress : '',
+          isNewCustomer: customerPhone.trim() !== '' && customerStats ? customerStats.isNewCustomer : false
       });
       
       // Reset customer details after successful order
       setCustomerName('');
       setCustomerPhone('');
+      setDeliveryAddress('');
+      setCustomerStats(null);
       
       setCart([]); 
       toast.success("Orders placed successfully!", { id: toastId });
@@ -428,11 +553,11 @@ const POS: React.FC = () => {
       if (restaurantData?.notificationSettings?.paymentStatusUpdate && 
           restaurantData?.notificationSettings?.telegramToken && 
           restaurantData?.notificationSettings?.telegramChatId) {
-        const message = `💳 *Payment Received*\n\n` +
-                        `Order: #${lastOrderDetails.formattedId || lastOrderDetails.id.slice(0, 6)}\n` +
-                        `Customer: ${lastOrderDetails.customerName}\n` +
-                        `Amount: ${currency}${lastOrderDetails.total.toFixed(2)}\n` +
-                        `Status: *PAID*`;
+        const message = `💳 <b>Payment Received</b>\n\n` +
+                        `<b>Order:</b> #${escapeHtml(lastOrderDetails.formattedId || lastOrderDetails.id.slice(-5))}\n` +
+                        `<b>Customer:</b> ${escapeHtml(lastOrderDetails.customerName || 'Guest')}\n` +
+                        `<b>Amount:</b> ${escapeHtml(currency)}${Number(lastOrderDetails.total || 0).toFixed(2)}\n` +
+                        `<b>Status:</b> <b>PAID</b>`;
         sendTelegramMessage(
           restaurantData.notificationSettings.telegramToken,
           restaurantData.notificationSettings.telegramChatId,
@@ -744,33 +869,46 @@ const POS: React.FC = () => {
         </div>
 
         {/* Menu Grid */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-            {filteredItems.map(item => {
-              const qty = cart.filter(c => c.id === item.id).reduce((sum, c) => sum + c.quantity, 0);
-              return (
-                <div 
-                  key={item.id} 
-                  onClick={() => item.variants && item.variants.length > 1 ? handleSelectVariant(item) : addToCart(item)}
-                  className={"bg-white rounded-xl shadow-sm border border-gray-200 cursor-pointer hover:shadow-md hover:border-orange-300 transition flex flex-col h-full active:scale-[0.98] group relative z-10" + (!showImages ? " p-2" : " p-3")}
-                >
-                  <div className={"bg-gray-50 rounded-lg overflow-hidden mb-3 relative" + (!showImages ? " hidden h-0" : " h-12 w-10")}>
-                    <img src={item.image}  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                    {qty > 0 && (
-                        <div className="absolute top-2 right-2 bg-[#FF5722] text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                            {qty}
-                        </div>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-1">
-                        <h4 className="font-bold text-gray-900 text-[10px] line-clamp-1">{item.name}</h4>
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-between">
+          <div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+              {filteredItems.slice(0, visibleCount).map(item => {
+                const qty = cart.filter(c => c.id === item.id).reduce((sum, c) => sum + c.quantity, 0);
+                return (
+                  <div 
+                    key={item.id} 
+                    onClick={() => item.variants && item.variants.length > 1 ? handleSelectVariant(item) : addToCart(item)}
+                    className={"bg-white rounded-xl shadow-sm border border-gray-200 cursor-pointer hover:shadow-md hover:border-orange-300 transition flex flex-col h-full active:scale-[0.98] group relative z-10" + (!showImages ? " p-2" : " p-3")}
+                  >
+                    <div className={"bg-gray-50 rounded-lg overflow-hidden mb-3 relative" + (!showImages ? " hidden h-0" : " h-12 w-10")}>
+                      <img src={item.image}  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      {qty > 0 && (
+                          <div className="absolute top-2 right-2 bg-[#FF5722] text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                              {qty}
+                          </div>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-500 font-medium">{currency}{item.price.toFixed(2)}</p>
+                    <div className="flex-1">
+                      <div className="flex justify-between items-start mb-1">
+                          <h4 className="font-bold text-gray-900 text-[10px] line-clamp-1">{item.name}</h4>
+                      </div>
+                      <p className="text-xs text-gray-500 font-medium">{currency}{item.price.toFixed(2)}</p>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+
+            {filteredItems.length > visibleCount && (
+              <div className="flex justify-center mt-6 mb-4">
+                <button
+                  onClick={() => setVisibleCount(prev => prev + 10)}
+                  className="px-6 py-2.5 bg-white text-[#FF5722] hover:bg-orange-50 border border-orange-200 rounded-xl text-sm font-bold shadow-sm hover:shadow transition flex items-center gap-1.5"
+                >
+                  <Plus className="h-4 w-4" /> Load More Items ({filteredItems.length - visibleCount} remaining)
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -808,6 +946,81 @@ const POS: React.FC = () => {
                     />
                 </div>
             </div>
+            
+            {/* Delivery Address Input */}
+            {orderType === 'Delivery' && (
+                <div className="relative">
+                    <textarea 
+                        className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-[#FF5722] focus:border-[#FF5722] outline-none transition-all resize-none shadow-inner" 
+                        placeholder="Enter Delivery Address"
+                        rows={2}
+                        value={deliveryAddress}
+                        onChange={e => setDeliveryAddress(e.target.value)}
+                    />
+                </div>
+            )}
+
+            {/* Customer Stats section */}
+            {loadingStats && (
+                <div className="flex items-center justify-center p-3 bg-orange-50 border border-orange-100 rounded-xl text-xs text-orange-600 font-medium animate-pulse">
+                    <Loader2 className="animate-spin h-3.5 w-3.5 mr-2 text-orange-500" />
+                    Checking customer history...
+                </div>
+            )}
+
+            {!loadingStats && customerStats && (
+                <div className="p-3 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-100 rounded-xl shadow-sm space-y-2">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-orange-800 flex items-center">
+                            <User className="h-3.5 w-3.5 mr-1 text-orange-600" /> Customer History
+                        </span>
+                        {customerStats.isNewCustomer && (
+                            <span className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-orange-200 flex items-center gap-1 animate-bounce">
+                                ✨ New Customer
+                            </span>
+                        )}
+                    </div>
+                    
+                    {!customerStats.isNewCustomer ? (
+                        <div className="space-y-1.5">
+                            <div className="grid grid-cols-2 gap-2 text-[10px]">
+                                <div className="bg-white p-2 rounded-lg border border-orange-100 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+                                    <div>
+                                        <span className="text-gray-400 block font-semibold uppercase tracking-wider text-[8px] mb-0.5">Weekly</span>
+                                        <span className="font-extrabold text-orange-700 block text-xs">{customerStats.weeklyVisits} visits</span>
+                                    </div>
+                                    <div className="mt-1 border-t border-gray-50 pt-1">
+                                        <span className="text-gray-400 block font-semibold uppercase tracking-wider text-[8px] mb-0.5">Weekly Spend</span>
+                                        <span className="font-extrabold text-green-700 block text-xs">{currency}{customerStats.weeklySpend.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-2 rounded-lg border border-orange-100 flex flex-col justify-between shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+                                    <div>
+                                        <span className="text-gray-400 block font-semibold uppercase tracking-wider text-[8px] mb-0.5">Monthly</span>
+                                        <span className="font-extrabold text-orange-700 block text-xs">{customerStats.monthlyVisits} visits</span>
+                                    </div>
+                                    <div className="mt-1 border-t border-gray-50 pt-1">
+                                        <span className="text-gray-400 block font-semibold uppercase tracking-wider text-[8px] mb-0.5">Monthly Spend</span>
+                                        <span className="font-extrabold text-green-700 block text-xs">{currency}{customerStats.monthlySpend.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="bg-white px-3 py-2 rounded-lg border border-orange-100 text-[10px] flex justify-between items-center shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+                                <div>
+                                    <span className="text-gray-400 font-semibold uppercase tracking-wider text-[8px] block">Lifetime Visits</span>
+                                    <span className="font-extrabold text-orange-700 text-xs">{customerStats.totalVisits}</span>
+                                </div>
+                                <div className="text-right">
+                                    <span className="text-gray-400 font-semibold uppercase tracking-wider text-[8px] block">Lifetime Spent</span>
+                                    <span className="font-extrabold text-green-700 text-xs">{currency}{customerStats.totalSpend.toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-[10px] text-orange-600 font-medium italic">No prior order history for this phone number.</p>
+                    )}
+                </div>
+            )}
             
             {/* Service Type Toggles */}
             <div className="flex bg-gray-100 p-1 rounded-lg">

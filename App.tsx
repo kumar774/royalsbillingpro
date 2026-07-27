@@ -7,72 +7,88 @@ import Dashboard from './pages/Dashboard';
 import { RestaurantProvider } from './context/RestaurantContext';
 import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './context/ThemeContext';
+import { AuthProvider } from './context/AuthContext';
+import { ProtectedRoute, GuestRoute } from './components/ProtectedRoute';
+
+import LandingPage from './pages/LandingPage';
 
 const App: React.FC = () => {
-  const [, setShowQrModal] = useState(false);
-  const [, setQrCodeValue] = useState('');
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [qrCodeValue, setQrCodeValue] = useState('');
   return (
     <Router>
       <ThemeProvider>
-        <Toaster 
-          position="top-right"
-          toastOptions={{
-            duration: 3000,
-            style: {
-              background: '#363636',
-              color: '#fff',
-            },
-            success: {
+        <AuthProvider>
+          <Toaster 
+            position="top-right"
+            toastOptions={{
               duration: 3000,
               style: {
-                background: '#22c55e',
-                color: 'white',
+                background: '#363636',
+                color: '#fff',
               },
-            },
-            error: {
-              duration: 4000,
-              style: {
-                background: '#ef4444',
-                color: 'white',
+              success: {
+                duration: 3000,
+                style: {
+                  background: '#22c55e',
+                  color: 'white',
+                },
               },
-            },
-          }}
-        />
-        <RestaurantProvider>
-          <Routes>
-            {/* Admin / Auth Routes */}
-            <Route path="/login" element={<Login />} />
-            
-            {/* Dashboard Routes with View Props */}
-            <Route path="/dashboard/:restaurantId" element={<Dashboard view="overview" />} />
-            <Route path="/dashboard/:restaurantId/menu" element={<Dashboard view="menu" />} />
-            <Route path="/dashboard/:restaurantId/settings" element={<Dashboard view="settings" />} />
-            <Route path="/dashboard/:restaurantId/pos" element={<Dashboard view="pos" />} />
-            <Route path="/dashboard/:restaurantId/orders" element={<Dashboard view="orders" />} />
-            <Route path="/dashboard/:restaurantId/expenses" element={<Dashboard view="expenses" />} />
-            <Route path="/dashboard/:restaurantId/reports" element={<Dashboard view="reports" />} />
-            <Route path="/dashboard/:restaurantId/customers" element={<Dashboard view="customers" />} />
-            
-            {/* Restaurant Management Routes */}
-            <Route path="/dashboard/:restaurantId/restaurants" element={<Dashboard view="restaurants" />} />
-            <Route path="/dashboard/:restaurantId/restaurants/new" element={<Dashboard view="restaurants-new" />} />
-            <Route path="/dashboard/:restaurantId/restaurants/edit/:editId" element={<Dashboard view="restaurants-edit" />} />
-            <Route path="/dashboard/:restaurantId/restaurants/config/:configId" element={<Dashboard view="restaurants-config" />} />
-  
-            {/* Customer Routes Wrapped in MainLayout */}
-            <Route path="*" element={
-              <MainLayout setShowQrModal={setShowQrModal} setQrCodeValue={setQrCodeValue}>
-                <Routes>
-                  <Route path="/" element={<RestaurantFrontPage />} />
-                  <Route path="/restaurant/:slug" element={<RestaurantFrontPage />} />
-                  <Route path="/restaurant/:slug/menu" element={<RestaurantFrontPage isMenuOnly={true} />} />
-                  {/* Fallback for unknown customer routes */}
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </MainLayout>
-            } />
-          </Routes>
-        </RestaurantProvider>
+              error: {
+                duration: 4000,
+                style: {
+                  background: '#ef4444',
+                  color: 'white',
+                },
+              },
+            }}
+          />
+          <RestaurantProvider>
+            <Routes>
+              {/* Admin / Auth Routes */}
+              <Route path="/login" element={
+                <GuestRoute>
+                  <Login />
+                </GuestRoute>
+              } />
+              
+              {/* Dashboard Routes with View Props */}
+              <Route path="/dashboard/:restaurantId" element={<ProtectedRoute><Dashboard view="overview" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/menu" element={<ProtectedRoute><Dashboard view="menu" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/settings" element={<ProtectedRoute><Dashboard view="settings" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/pos" element={<ProtectedRoute><Dashboard view="pos" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/orders" element={<ProtectedRoute><Dashboard view="orders" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/expenses" element={<ProtectedRoute><Dashboard view="expenses" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/staff" element={<ProtectedRoute><Dashboard view="staff" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/reports" element={<ProtectedRoute><Dashboard view="reports" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/customers" element={<ProtectedRoute><Dashboard view="customers" /></ProtectedRoute>} />
+              
+              {/* Restaurant Management Routes */}
+              <Route path="/dashboard/:restaurantId/restaurants" element={<ProtectedRoute><Dashboard view="restaurants" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/restaurants/new" element={<ProtectedRoute><Dashboard view="restaurants-new" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/restaurants/edit/:editId" element={<ProtectedRoute><Dashboard view="restaurants-edit" /></ProtectedRoute>} />
+              <Route path="/dashboard/:restaurantId/restaurants/config/:configId" element={<ProtectedRoute><Dashboard view="restaurants-config" /></ProtectedRoute>} />
+    
+              {/* Customer Routes Wrapped in MainLayout */}
+              <Route path="*" element={
+                <MainLayout 
+                  setShowQrModal={setShowQrModal} 
+                  setQrCodeValue={setQrCodeValue}
+                  showQrModal={showQrModal}
+                  qrCodeValue={qrCodeValue}
+                >
+                  <Routes>
+                    <Route path="/" element={<LandingPage />} />
+                    <Route path="/restaurant/:slug" element={<RestaurantFrontPage />} />
+                    <Route path="/restaurant/:slug/menu" element={<RestaurantFrontPage isMenuOnly={true} />} />
+                    {/* Fallback for unknown customer routes */}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </MainLayout>
+              } />
+            </Routes>
+          </RestaurantProvider>
+        </AuthProvider>
       </ThemeProvider>
     </Router>
   );
