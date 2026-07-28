@@ -142,46 +142,50 @@ const CRM: React.FC = () => {
     const checkInitialStatus = async () => {
       if (!restaurantId) return;
       
-      // Dynamic: check active status from fetchInstances list or connectionState
-      const status = await checkConnectionStatus(INSTANCE_NAME);
-      console.log(`[STATUS] ${INSTANCE_NAME}: ${status}`);
-      
-      if (status === 'open') {
-        setWaStatus('READY');
-        setResolvedInstanceName(INSTANCE_NAME);
-      } else if (status === 'connecting') {
-        setWaStatus('CONNECTING');
-        setResolvedInstanceName(INSTANCE_NAME);
-      } else if (status === 'close') {
-        setWaStatus('CLOSE');
-        setResolvedInstanceName(INSTANCE_NAME);
-      } else if (status === null) {
-        // Fallback: If 404/Null check if instance is registered with a slight typo (like 4 vs 1 in ID)
-        try {
-          const response = await fetch(`https://evo.welcofincarepvt.com/instance/fetchInstances`, {
-            headers: { 'apikey': '4a51fbf7d23db2369899f6e2a1c7d2ded42bc4459d4d55f33bfa808f0699cf2' }
-          });
-          if (response.ok) {
-            const list = await response.json();
-            const activeInstance = list.find((ins: any) => 
-              ins.name.toLowerCase().includes(restaurantId.toLowerCase()) && ins.connectionStatus === 'open'
-            );
-            if (activeInstance) {
+      try {
+        // Step 1: Fetch all instances to check actual database registration status (More reliable than single state API)
+        const response = await fetch(`https://evo.welcofincarepvt.com/instance/fetchInstances`, {
+          headers: { 'apikey': '4a51fbf7d23db2369899f6e2a1c7d2ded42bc4459d4d55f33bfa808f0699cf2' }
+        });
+        if (response.ok) {
+          const list = await response.json();
+          // Find matching instance (regardless of slight ID typos e.g., CraveWave_LcZY1OW9aysQYALVnv0x vs CraveWave_LcZY4OW9aysQYALVnv0x)
+          const activeInstance = list.find((ins: any) => 
+            ins.name.toLowerCase().includes(restaurantId.toLowerCase())
+          );
+          
+          if (activeInstance) {
+            setResolvedInstanceName(activeInstance.name);
+            if (activeInstance.connectionStatus === 'open') {
               setWaStatus('READY');
-              setResolvedInstanceName(activeInstance.name);
+              return;
+            } else if (activeInstance.connectionStatus === 'connecting') {
+              setWaStatus('CONNECTING');
+              return;
+            } else {
+              setWaStatus('DISCONNECTED');
               return;
             }
           }
-        } catch (e) {
-          console.warn("Fallback instance list fetch failed:", e);
         }
-        setWaStatus('NULL');
-        setResolvedInstanceName(INSTANCE_NAME);
+      } catch (e) {
+        console.warn("Instance fetch failed, falling back to connectionState check:", e);
+      }
+
+      // Step 2: Fallback to connectionState if list fetch fails
+      const status = await checkConnectionStatus(INSTANCE_NAME);
+      console.log(`[STATUS FALLBACK] ${INSTANCE_NAME}: ${status}`);
+      setResolvedInstanceName(INSTANCE_NAME);
+      
+      if (status === 'open') {
+        setWaStatus('READY');
+      } else if (status === 'connecting') {
+        setWaStatus('CONNECTING');
       } else {
         setWaStatus('DISCONNECTED');
-        setResolvedInstanceName(INSTANCE_NAME);
       }
     };
+    
     checkInitialStatus();
     // Removed the interval to prevent infinite 404 polling loop
   }, [restaurantId, INSTANCE_NAME]);
