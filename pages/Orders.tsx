@@ -160,41 +160,76 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     if (!restaurantId) return;
 
     const ordersRef = collection(db, 'restaurants', restaurantId, 'orders');
-    
-    let q;
-    if (startDate || endDate) {
-      // Dynamic query to only load custom date range to avoid full-database read billing costs
-      let conditions = [];
-      if (startDate) {
-        const start = new Date(startDate);
-        start.setHours(0, 0, 0, 0);
-        conditions.push(where('createdAt', '>=', start.toISOString()));
-      }
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        conditions.push(where('createdAt', '<=', end.toISOString()));
-      }
-      q = query(ordersRef, ...conditions);
-    } else {
-      // Default: Calculate timestamp for 3 days ago to significantly reduce realtime billing reads
-      const threeDaysAgo = new Date();
-      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
-      q = query(ordersRef, where('createdAt', '>=', threeDaysAgo.toISOString()));
-    }
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedOrders = snapshot.docs.map(doc => ({
+
+    // 1. Live Snapshot Query: Strictly listen to today's orders to catch incoming orders in real-time
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const liveQuery = query(ordersRef, where('createdAt', '>=', todayStart.toISOString()));
+
+    let liveOrders: Order[] = [];
+    let historyOrders: Order[] = [];
+
+    const mergeAndSortOrders = () => {
+      // Merge live and historical orders, removing duplicates
+      const orderMap = new Map<string, Order>();
+      historyOrders.forEach(o => orderMap.set(o.id, o));
+      liveOrders.forEach(o => orderMap.set(o.id, o));
+
+      const merged = Array.from(orderMap.values());
+      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setOrders(merged);
+    };
+
+    // Attach real-time listener for today's orders
+    const unsubscribeLive = onSnapshot(liveQuery, (snapshot) => {
+      liveOrders = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Order[];
-      
-      fetchedOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      
-      setOrders(fetchedOrders);
+      mergeAndSortOrders();
     });
 
-    return () => unsubscribe();
+    // 2. Historical Fetch Query: Fetch older orders (one-time) using client-side cache first to save read costs
+    const fetchHistory = async () => {
+      try {
+        let historyQuery;
+        if (startDate || endDate) {
+          // If custom range selected, query only that range
+          let conditions = [];
+          if (startDate) {
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            conditions.push(where('createdAt', '>=', start.toISOString()));
+          }
+          if (endDate) {
+            const end = new Date(endDate);
+            end.setHours(23, 59, 59, 999);
+            conditions.push(where('createdAt', '<=', end.toISOString()));
+          }
+          historyQuery = query(ordersRef, ...conditions);
+        } else {
+          // By default load last 30 days orders using one-time fetch (mostly fulfilled by local cache)
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          historyQuery = query(ordersRef, where('createdAt', '>=', thirtyDaysAgo.toISOString()));
+        }
+
+        const snapshot = await getDocs(historyQuery);
+        historyOrders = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Order[];
+        mergeAndSortOrders();
+      } catch (err) {
+        console.error("Error fetching historical orders:", err);
+      }
+    };
+
+    fetchHistory();
+
+    return () => {
+      unsubscribeLive();
+    };
   }, [restaurantId, startDate, endDate]);
 
    const updateStatus = async (orderId: string, newStatus: OrderStatus) => {
