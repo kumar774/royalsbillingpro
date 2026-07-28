@@ -318,7 +318,7 @@ export const addParticipantToGroup = async (instanceName: string, groupJid: stri
   }
 
   const response = await fetch(`${EVOLUTION_BASE_URL}/group/updateParticipant/${instanceName}?groupJid=${groupJid}`, {
-    method: 'PUT',
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'apikey': API_KEY,
