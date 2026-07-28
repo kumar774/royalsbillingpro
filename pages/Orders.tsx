@@ -217,7 +217,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         const snapshot = await getDocs(historyQuery);
         historyOrders = snapshot.docs.map(doc => ({
           id: doc.id,
-          ...doc.data()
+          ...(doc.data() as object)
         })) as Order[];
         mergeAndSortOrders();
       } catch (err) {
