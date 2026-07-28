@@ -104,6 +104,7 @@ const CRM: React.FC = () => {
 
   const now = new Date();
   const INSTANCE_NAME = restaurantId ? `CraveWave_${restaurantId}` : 'CraveWave_Default';
+  const [resolvedInstanceName, setResolvedInstanceName] = useState<string>(INSTANCE_NAME);
 
   const formatDate = (dateStr: string) => {
     try {
@@ -140,19 +141,45 @@ const CRM: React.FC = () => {
   useEffect(() => {
     const checkInitialStatus = async () => {
       if (!restaurantId) return;
+      
+      // Dynamic: check active status from fetchInstances list or connectionState
       const status = await checkConnectionStatus(INSTANCE_NAME);
       console.log(`[STATUS] ${INSTANCE_NAME}: ${status}`);
       
       if (status === 'open') {
         setWaStatus('READY');
+        setResolvedInstanceName(INSTANCE_NAME);
       } else if (status === 'connecting') {
         setWaStatus('CONNECTING');
+        setResolvedInstanceName(INSTANCE_NAME);
       } else if (status === 'close') {
         setWaStatus('CLOSE');
+        setResolvedInstanceName(INSTANCE_NAME);
       } else if (status === null) {
+        // Fallback: If 404/Null check if instance is registered with a slight typo (like 4 vs 1 in ID)
+        try {
+          const response = await fetch(`https://evo.welcofincarepvt.com/instance/fetchInstances`, {
+            headers: { 'apikey': '4a51fbf7d23db2369899f6e2a1c7d2ded42bc4459d4d55f33bfa808f0699cf2' }
+          });
+          if (response.ok) {
+            const list = await response.json();
+            const activeInstance = list.find((ins: any) => 
+              ins.name.toLowerCase().includes(restaurantId.toLowerCase()) && ins.connectionStatus === 'open'
+            );
+            if (activeInstance) {
+              setWaStatus('READY');
+              setResolvedInstanceName(activeInstance.name);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn("Fallback instance list fetch failed:", e);
+        }
         setWaStatus('NULL');
+        setResolvedInstanceName(INSTANCE_NAME);
       } else {
         setWaStatus('DISCONNECTED');
+        setResolvedInstanceName(INSTANCE_NAME);
       }
     };
     checkInitialStatus();
@@ -195,14 +222,14 @@ const CRM: React.FC = () => {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [showQRModal, INSTANCE_NAME, isConnecting]);
+  }, [showQRModal, resolvedInstanceName, isConnecting]);
 
   const handleDisconnect = async () => {
       if (!window.confirm("Are you sure you want to disconnect WhatsApp?")) return;
       
       toast.loading("Disconnecting...", { id: 'disconnect' });
       try {
-          await logoutEvolutionInstance(INSTANCE_NAME);
+          await logoutEvolutionInstance(resolvedInstanceName);
           setWaStatus('NULL');
           toast.success("Disconnected successfully", { id: 'disconnect' });
       } catch (e) {
@@ -215,11 +242,11 @@ const CRM: React.FC = () => {
       console.log("[AUTO-RESTART] Connection stuck. Restarting...");
       toast.loading("Connection stuck. Restarting instance...", { id: 'restart' });
       try {
-          await restartInstance(INSTANCE_NAME);
+          await restartInstance(resolvedInstanceName);
           await new Promise(resolve => setTimeout(resolve, 5000));
           toast.success("Instance restarted. Refreshing QR...", { id: 'restart' });
           // Fetch fresh QR
-          const qr = await getEvolutionQR(INSTANCE_NAME);
+          const qr = await getEvolutionQR(resolvedInstanceName);
           if (qr) setQrCode(qr);
       } catch (e) {
           console.error("Restart failed", e);
@@ -235,7 +262,7 @@ const CRM: React.FC = () => {
     setQrCode(null);
     
     try {
-      const qr = await getEvolutionQR(INSTANCE_NAME);
+      const qr = await getEvolutionQR(resolvedInstanceName);
       if (qr) {
         setQrCode(qr);
         setWaStatus('WAITING_QR');
@@ -267,7 +294,7 @@ const CRM: React.FC = () => {
       setShowQRModal(true);
       setQrCode(null);
       
-      const qr = await getEvolutionQR(INSTANCE_NAME);
+      const qr = await getEvolutionQR(resolvedInstanceName);
       if (qr) {
         setQrCode(qr);
         setWaStatus('WAITING_QR');
@@ -292,7 +319,7 @@ const CRM: React.FC = () => {
       const loadGroups = async () => {
         setLoadingGroups(true);
         try {
-          const list = await fetchEvolutionGroups(INSTANCE_NAME);
+          const list = await fetchEvolutionGroups(resolvedInstanceName);
           setGroups(list);
         } catch (e) {
           toast.error("Failed to load WhatsApp groups. Ensure instance is connected.");
@@ -302,7 +329,7 @@ const CRM: React.FC = () => {
       };
       loadGroups();
     }
-  }, [showGroupModal, waStatus, INSTANCE_NAME]);
+  }, [showGroupModal, waStatus, resolvedInstanceName]);
 
   const handleAddToGroup = async (groupJid: string, groupSubject: string) => {
     if (groupTargetCustomers.length === 0) return;
@@ -315,7 +342,7 @@ const CRM: React.FC = () => {
       const customer = groupTargetCustomers[i];
       setAddingProgress(prev => ({ ...prev, current: i + 1 }));
       try {
-        await addParticipantToGroup(INSTANCE_NAME, groupJid, customer.phone);
+        await addParticipantToGroup(resolvedInstanceName, groupJid, customer.phone);
         successCount++;
       } catch (err) {
         console.error(`Failed to add ${customer.name} to group:`, err);
@@ -352,12 +379,12 @@ const CRM: React.FC = () => {
     toast.loading("Creating new WhatsApp Group...", { id: 'create-group' });
     try {
       const phones = groupTargetCustomers.map(c => c.phone);
-      const result = await createEvolutionGroup(INSTANCE_NAME, newGroupName, phones);
+      const result = await createEvolutionGroup(resolvedInstanceName, newGroupName, phones);
       toast.success(`Group "${newGroupName}" created successfully!`, { id: 'create-group' });
       setShowGroupModal(false);
       setNewGroupName('');
       // Reload groups list
-      const list = await fetchEvolutionGroups(INSTANCE_NAME).catch(() => []);
+      const list = await fetchEvolutionGroups(resolvedInstanceName).catch(() => []);
       setGroups(list);
     } catch (err: any) {
       console.error(err);
@@ -508,7 +535,7 @@ const CRM: React.FC = () => {
           setPhoneVerificationMap(prev => ({ ...prev, [customer.phone]: 'CHECKING' }));
           
           try {
-            const exists = await checkWhatsAppNumber(INSTANCE_NAME, customer.phone);
+            const exists = await checkWhatsAppNumber(resolvedInstanceName, customer.phone);
             setPhoneVerificationMap(prev => ({ 
               ...prev, 
               [customer.phone]: exists ? 'VERIFIED' : 'NOT_VERIFIED' 
@@ -524,7 +551,7 @@ const CRM: React.FC = () => {
       
       verifyNumbers();
     }
-  }, [waStatus, customers, INSTANCE_NAME]);
+  }, [waStatus, customers, resolvedInstanceName]);
 
 
   const startBulkQueue = async () => {
@@ -540,7 +567,7 @@ const CRM: React.FC = () => {
     
     try {
       await sendBulkEvolutionMessage(
-        INSTANCE_NAME,
+        resolvedInstanceName,
         numbers,
         bulkMessage,
         (sent, failed, total) => {
@@ -572,7 +599,7 @@ const CRM: React.FC = () => {
     if (targetCustomer && customMessage.trim()) {
       try {
         toast.loading("Sending message...", { id: 'send-custom' });
-        await sendEvolutionMessage(INSTANCE_NAME, targetCustomer.phone, customMessage);
+        await sendEvolutionMessage(resolvedInstanceName, targetCustomer.phone, customMessage);
         setShowCustomModal(false);
         setTargetCustomer(null);
         setCustomMessage("");
