@@ -160,7 +160,28 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     if (!restaurantId) return;
 
     const ordersRef = collection(db, 'restaurants', restaurantId, 'orders');
-    const q = query(ordersRef); 
+    
+    let q;
+    if (startDate || endDate) {
+      // Dynamic query to only load custom date range to avoid full-database read billing costs
+      let conditions = [];
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        conditions.push(where('createdAt', '>=', start.toISOString()));
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        conditions.push(where('createdAt', '<=', end.toISOString()));
+      }
+      q = query(ordersRef, ...conditions);
+    } else {
+      // Default: Calculate timestamp for 3 days ago to significantly reduce realtime billing reads
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      q = query(ordersRef, where('createdAt', '>=', threeDaysAgo.toISOString()));
+    }
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedOrders = snapshot.docs.map(doc => ({
@@ -174,7 +195,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     });
 
     return () => unsubscribe();
-  }, [restaurantId]);
+  }, [restaurantId, startDate, endDate]);
 
    const updateStatus = async (orderId: string, newStatus: OrderStatus) => {
     if (permissions && !permissions.orders.edit) {

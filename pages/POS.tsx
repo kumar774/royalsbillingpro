@@ -138,15 +138,24 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
         };
     }
   }, [restaurantId]);
-
+ 
+  // Load menu items using one-time fetch to reduce Firebase reads significantly
   useEffect(() => {
     if (!restaurantId) return;
-    const unsubscribe = onSnapshot(collection(db, 'restaurants', restaurantId, 'menu'), (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
-      setMenuItems(items);
-      setFilteredItems(items);
-    });
-    return () => unsubscribe();
+    
+    const fetchMenu = async () => {
+      try {
+        const menuRef = collection(db, 'restaurants', restaurantId, 'menu');
+        const snapshot = await getDocs(menuRef);
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MenuItem));
+        setMenuItems(items);
+        setFilteredItems(items);
+      } catch (err) {
+        console.error("Error fetching menu items:", err);
+      }
+    };
+    
+    fetchMenu();
   }, [restaurantId]);
 
   // Handle Delivery Charge Default
