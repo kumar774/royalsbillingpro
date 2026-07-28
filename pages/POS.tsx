@@ -34,6 +34,8 @@ interface LastOrderDetails {
   };
   restaurantIds: string[];
   paymentQrLink: string;
+  deliveryAddress?: string;
+  aadhaarNumber?: string;
 }
 
 interface POSProps {
@@ -362,6 +364,14 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
     item.customCategory?.toLowerCase() === 'room'
   );
 
+  useEffect(() => {
+    if (hasRoomItem) {
+      setOrderType('Booking');
+    } else if (orderType === 'Booking') {
+      setOrderType('Dine-in');
+    }
+  }, [hasRoomItem]);
+
   const isFormValid = 
     isValidPhone(customerPhone) && 
     (hasRoomItem 
@@ -552,6 +562,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
           restaurantIds: [restaurantId],
           paymentQrLink: paymentQrLink,
           deliveryAddress: orderType === 'Delivery' ? deliveryAddress : '',
+          aadhaarNumber: hasRoomItem ? aadhaarNumber : '',
           isNewCustomer: customerPhone.trim() !== '' && customerStats ? customerStats.isNewCustomer : false
       });
       
@@ -1073,7 +1084,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
             
             {/* Service Type Toggles */}
             <div className="flex bg-gray-100 p-1 rounded-lg">
-                {['Dine-in', 'Takeaway', 'Delivery'].map(type => (
+                {(hasRoomItem ? ['Booking'] : ['Dine-in', 'Takeaway', 'Delivery']).map(type => (
                         <button
                         key={type}
                         onClick={() => setOrderType(type as OrderType)}
@@ -1086,6 +1097,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
                             {type === 'Dine-in' && <Utensils className="h-3 w-3 mr-1"/>}
                             {type === 'Takeaway' && <ShoppingBag className="h-3 w-3 mr-1"/>}
                             {type === 'Delivery' && <Bike className="h-3 w-3 mr-1"/>}
+                            {type === 'Booking' && <Fingerprint className="h-3 w-3 mr-1"/>}
                             {type}
                         </button>
                 ))}

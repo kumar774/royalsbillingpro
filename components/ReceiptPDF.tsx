@@ -118,6 +118,12 @@ export const generateProfessionalReceipt = async (
         const addrLines = Math.ceil(order.deliveryAddress.length / charsPerLine);
         estimatedHeight += addrLines * 4.5;
     }
+
+    if ('aadhaarNumber' in order && order.aadhaarNumber) {
+        const charsPerLine = pageWidth > 60 ? 35 : 25;
+        const aadhaarLines = Math.ceil(order.aadhaarNumber.length / charsPerLine);
+        estimatedHeight += aadhaarLines * 4.5;
+    }
     
     // Divider + Items Header + Divider
     estimatedHeight += 12;
@@ -214,6 +220,13 @@ export const generateProfessionalReceipt = async (
         const splitAddress = doc.splitTextToSize(addressText, contentWidth);
         doc.text(splitAddress, margin, y);
         y += (splitAddress.length * fontSizeNormal * 0.4) + 1;
+    }
+
+    if ('aadhaarNumber' in order && order.aadhaarNumber) {
+        const aadhaarText = `Aadhaar: ${order.aadhaarNumber}`;
+        const splitAadhaar = doc.splitTextToSize(aadhaarText, contentWidth);
+        doc.text(splitAadhaar, margin, y);
+        y += (splitAadhaar.length * fontSizeNormal * 0.4) + 1;
     }
 
     // Payment Info

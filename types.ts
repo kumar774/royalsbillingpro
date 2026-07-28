@@ -160,7 +160,7 @@ export interface CartState {
 }
 
 export type OrderStatus = 'Pending' | 'Preparing' | 'Ready' | 'Completed' | 'Cancelled';
-export type OrderType = 'Dine-in' | 'Takeaway' | 'Delivery' | 'Online' | 'POS';
+export type OrderType = 'Dine-in' | 'Takeaway' | 'Delivery' | 'Online' | 'POS' | 'Booking';
 export type PaymentStatus = 'Pending' | 'Paid';
 export type PaymentMethod = 'Cash' | 'Online' | 'Card';
 
@@ -216,6 +216,7 @@ export interface LastOrderDetails {
   paymentQrLink?: string; // New field for the payment QR link
   restaurantId?: string;
   deliveryAddress?: string;
+  aadhaarNumber?: string;
   isNewCustomer?: boolean;
 }
 

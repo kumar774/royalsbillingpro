@@ -102,6 +102,14 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
     item.customCategory?.toLowerCase() === 'room'
   );
 
+  useEffect(() => {
+    if (hasRoomItem) {
+      setOrderType('Booking');
+    } else {
+      setOrderType('Delivery');
+    }
+  }, [hasRoomItem]);
+
   const isFormValid = guestName.trim() !== '' && 
     isValidPhone(guestPhone) && 
     (hasRoomItem 
