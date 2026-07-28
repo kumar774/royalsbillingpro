@@ -377,3 +377,42 @@ export const createEvolutionGroup = async (
   };
 };
 
+/**
+ * Checks if a phone number is registered on WhatsApp.
+ * Returns true if registered, false otherwise.
+ */
+export const checkWhatsAppNumber = async (instanceName: string, phone: string): Promise<boolean> => {
+  try {
+    let cleanNumber = phone.replace(/\D/g, '');
+    if (!cleanNumber.startsWith('91') && cleanNumber.length === 10) {
+      cleanNumber = '91' + cleanNumber;
+    }
+
+    const response = await fetch(`${EVOLUTION_BASE_URL}/chat/whatsappNumbers/${instanceName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': API_KEY,
+        'ngrok-skip-browser-warning': 'true'
+      },
+      body: JSON.stringify({
+        numbers: [cleanNumber]
+      })
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const result = await response.json();
+    if (Array.isArray(result) && result.length > 0) {
+      return result[0]?.exists === true || result[0]?.exists === 'true';
+    }
+    return false;
+  } catch (error) {
+    console.error(`Error verifying WhatsApp existence for ${phone}:`, error);
+    return false;
+  }
+};
+
+

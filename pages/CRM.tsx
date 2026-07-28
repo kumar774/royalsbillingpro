@@ -7,7 +7,7 @@ import { MessageSquare, Download, Phone, TrendingUp, Award, AlertCircle, Send, X
 import { useParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { toast } from 'react-hot-toast';
-import { sendBulkEvolutionMessage, getEvolutionQR, sendEvolutionMessage, checkConnectionStatus, restartInstance, logoutEvolutionInstance, fetchEvolutionGroups, addParticipantToGroup, createEvolutionGroup, EvolutionGroup } from '../services/evolutionService';
+import { sendBulkEvolutionMessage, getEvolutionQR, sendEvolutionMessage, checkConnectionStatus, restartInstance, logoutEvolutionInstance, fetchEvolutionGroups, addParticipantToGroup, createEvolutionGroup, EvolutionGroup, checkWhatsAppNumber } from '../services/evolutionService';
 import { QRCodeSVG } from 'qrcode.react';
 
 interface CustomerData {
@@ -90,6 +90,7 @@ const CRM: React.FC = () => {
   const [showQRModal, setShowQRModal] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isAutoFixing, setIsAutoFixing] = useState(false);
+  const [phoneVerificationMap, setPhoneVerificationMap] = useState<Record<string, 'VERIFIED' | 'NOT_VERIFIED' | 'CHECKING' | 'UNCHECKED'>>({});
 
   // WhatsApp Group States
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -478,6 +479,52 @@ const CRM: React.FC = () => {
 
     fetchCustomers();
   }, [restaurantId]);
+
+  // Auto-verify WhatsApp numbers for loaded customers when WA is READY
+  useEffect(() => {
+    if (waStatus === 'READY' && customers.length > 0) {
+      const verifyNumbers = async () => {
+        // Initialize unchecked status for all loaded customers
+        const initialMap: Record<string, any> = { ...phoneVerificationMap };
+        let needsCheck = false;
+        
+        customers.forEach(c => {
+          if (!initialMap[c.phone]) {
+            initialMap[c.phone] = 'UNCHECKED';
+            needsCheck = true;
+          }
+        });
+        
+        if (needsCheck) {
+          setPhoneVerificationMap(initialMap);
+        }
+
+        // Process batch check sequentially with anti-ban delay
+        for (const customer of customers) {
+          if (phoneVerificationMap[customer.phone] && phoneVerificationMap[customer.phone] !== 'UNCHECKED') {
+            continue;
+          }
+          
+          setPhoneVerificationMap(prev => ({ ...prev, [customer.phone]: 'CHECKING' }));
+          
+          try {
+            const exists = await checkWhatsAppNumber(INSTANCE_NAME, customer.phone);
+            setPhoneVerificationMap(prev => ({ 
+              ...prev, 
+              [customer.phone]: exists ? 'VERIFIED' : 'NOT_VERIFIED' 
+            }));
+          } catch (err) {
+            setPhoneVerificationMap(prev => ({ ...prev, [customer.phone]: 'NOT_VERIFIED' }));
+          }
+          
+          // Small sleep between checks to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 800));
+        }
+      };
+      
+      verifyNumbers();
+    }
+  }, [waStatus, customers, INSTANCE_NAME]);
 
 
   const startBulkQueue = async () => {
@@ -1065,7 +1112,28 @@ const CRM: React.FC = () => {
                     <td className="py-4 px-6 text-left">
                       <div className="flex flex-col">
                         <span className="font-bold text-gray-900">{customer.name}</span>
-                        <span className="text-xs text-gray-500 mb-1">{customer.phone}</span>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-xs text-gray-500">{customer.phone}</span>
+                          {waStatus === 'READY' && (
+                            <>
+                              {phoneVerificationMap[customer.phone] === 'VERIFIED' && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-green-50 text-green-700 border border-green-200">
+                                  WhatsApp
+                                </span>
+                              )}
+                              {phoneVerificationMap[customer.phone] === 'NOT_VERIFIED' && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-50 text-red-700 border border-red-200">
+                                  Not Found
+                                </span>
+                              )}
+                              {phoneVerificationMap[customer.phone] === 'CHECKING' && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 animate-pulse">
+                                  Checking...
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
                         <div className="flex items-center text-[10px] text-orange-600 font-medium bg-orange-50 px-2 py-0.5 rounded w-fit">
                           <TrendingUp className="h-3 w-3 mr-1" /> {customer.mostOrderedItem}
                         </div>
