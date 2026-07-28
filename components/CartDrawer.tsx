@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, ShoppingBag, Plus, Minus, ArrowRight, Loader2, CheckCircle, Bike, Utensils, Download, User, Phone, QrCode, Trash2, Copy, MessageSquare } from 'lucide-react';
+import { X, ShoppingBag, Plus, Minus, ArrowRight, Loader2, Fingerprint, CheckCircle, Bike, Utensils, Download, User, Phone, QrCode, Trash2, Copy, MessageSquare } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { collection, addDoc, doc, getDoc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -33,6 +33,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
   // Guest Details
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
   
   // Payment & Order State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Online');
@@ -95,7 +96,18 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
 
   // 3. Validation
   const isValidPhone = (phone: string) => /^\d{10}$/.test(phone.trim());
-  const isFormValid = guestName.trim() !== '' && isValidPhone(guestPhone) && deliveryAddress.trim() !== '';
+
+  const hasRoomItem = items.some(item => 
+    item.categoryGroup?.toLowerCase() === 'room' || 
+    item.customCategory?.toLowerCase() === 'room'
+  );
+
+  const isFormValid = guestName.trim() !== '' && 
+    isValidPhone(guestPhone) && 
+    (hasRoomItem 
+      ? /^\d{12}$/.test(aadhaarNumber.trim()) 
+      : deliveryAddress.trim() !== ''
+    );
 
   const generateReceiptPDF = async () => {
       if (!lastOrderData) return;
@@ -116,7 +128,11 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
     if (!restaurantId) return;
 
     if (!isFormValid) {
-        toast.error("Please enter Name and a valid 10-digit Phone Number.");
+        if (hasRoomItem && !/^\d{12}$/.test(aadhaarNumber.trim())) {
+            toast.error("Please enter Name, valid Phone, and a 12-digit Aadhaar Number.");
+        } else {
+            toast.error("Please enter Name, valid Phone, and Delivery Address.");
+        }
         return;
     }
 
@@ -175,7 +191,8 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
         createdAt: now,
         customerName: guestName, 
         customerPhone: guestPhone,
-        deliveryAddress: deliveryAddress
+        deliveryAddress: hasRoomItem ? '' : deliveryAddress,
+        aadhaarNumber: hasRoomItem ? aadhaarNumber : ''
       };
 
       const docRef = await addDoc(collection(db, 'restaurants', restaurantId, 'orders'), orderPayload);
@@ -237,6 +254,7 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
       setShowOnlinePayment(false);
       setOrderType('Delivery'); 
       setDeliveryAddress('');
+      setAadhaarNumber('');
       setGuestName('');
       setGuestPhone('');
       setPaymentMethod('Online'); // Reset payment method
@@ -572,16 +590,33 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                         </div>
                    </div>
 
-                    <div className="relative">
-                        <textarea 
-                            placeholder="Enter Complete Delivery Address..."
-                            value={deliveryAddress}
-                            onChange={(e) => setDeliveryAddress(e.target.value)}
-                            rows={2}
-                            required
-                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-1 focus:ring-[#FF5722] outline-none resize-none"
-                        />
-                    </div>
+                    {/* Aadhaar Number input for Room items */}
+                    {hasRoomItem && (
+                        <div className="relative">
+                            <Fingerprint className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                            <input 
+                                type="text"
+                                maxLength={12}
+                                placeholder="Customer Aadhaar Number"
+                                value={aadhaarNumber}
+                                onChange={(e) => setAadhaarNumber(e.target.value.replace(/\D/g, ''))}
+                                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-1 focus:ring-[#FF5722] outline-none"
+                            />
+                        </div>
+                    )}
+
+                    {!hasRoomItem && (
+                        <div className="relative">
+                            <textarea 
+                                placeholder="Enter Complete Delivery Address..."
+                                value={deliveryAddress}
+                                onChange={(e) => setDeliveryAddress(e.target.value)}
+                                rows={2}
+                                required
+                                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-1 focus:ring-[#FF5722] outline-none resize-none"
+                            />
+                        </div>
+                    )}
 
                     {/* Payment Method Selection - Website orders are Online Only */}
                     <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex items-center justify-between">
@@ -623,7 +658,11 @@ const CartDrawer: React.FC<CartDrawerProps> = () => {
                     onClick={() => {
                         if (paymentMethod === 'Online') {
                             if (!isFormValid) {
-                                toast.error("Please enter Name and a valid 10-digit Phone Number.");
+                                if (hasRoomItem && !/^\d{12}$/.test(aadhaarNumber.trim())) {
+                                    toast.error("Please enter Name, valid Phone, and a 12-digit Aadhaar Number.");
+                                } else {
+                                    toast.error("Please enter Name, valid Phone, and Delivery Address.");
+                                }
                                 return;
                             }
                             setShowOnlinePayment(true);

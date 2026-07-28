@@ -183,6 +183,7 @@ export interface Order {
   createdAt: string; 
   deliveryAddress?: string;
   isNewCustomer?: boolean;
+  aadhaarNumber?: string;
   // Payment Tracking
   paymentStatus?: PaymentStatus;
   paymentMethod?: PaymentMethod;

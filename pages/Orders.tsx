@@ -620,6 +620,11 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                         <span className="font-bold text-gray-500 mr-1">📍 Delivery:</span> {order.deliveryAddress}
                       </p>
                     )}
+                    {order.aadhaarNumber && (
+                      <p className="text-xs text-gray-600 mt-1 flex items-center bg-gray-50 px-2 py-1 rounded border border-gray-100 font-medium">
+                        <span className="font-bold text-gray-500 mr-1">🪪 Aadhaar:</span> {order.aadhaarNumber}
+                      </p>
+                    )}
                     <p className="text-xs text-gray-400 mt-1">{new Date(order.createdAt).toLocaleString()}</p>
                   </div>
                   {(!permissions || permissions.orders.delete) && (

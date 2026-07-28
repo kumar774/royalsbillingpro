@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { MenuItem, CartItem, OrderType, Restaurant, PaymentMethod, Variant, Order, TaxSettings, RolePermissions } from '../types';
-import { Search, Plus, Minus, Trash2, CreditCard, Loader2, Printer, MessageSquare, CheckCircle, User, Phone, Wallet, QrCode, Tag, X, Bike, Utensils, ShoppingBag, Receipt, Copy, Download } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, CreditCard, Loader2, Fingerprint, Printer, MessageSquare, CheckCircle, User, Phone, Wallet, QrCode, Tag, X, Bike, Utensils, ShoppingBag, Receipt, Copy, Download } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'react-hot-toast';
 import { generateProfessionalReceipt } from '../components/ReceiptPDF';
@@ -56,6 +56,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
   // Admin Order Inputs
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [customerStats, setCustomerStats] = useState<{
     weeklyVisits: number;
@@ -338,6 +339,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       setCustomerName('');
       setCustomerPhone('');
       setDeliveryAddress('');
+      setAadhaarNumber('');
       setCustomerStats(null);
       setOrderType('Dine-in');
       setPaymentMethod('Cash');
@@ -355,9 +357,17 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
     return trimmed === '' || /^\d{10}$/.test(trimmed);
   };
 
+  const hasRoomItem = cart.some(item => 
+    item.categoryGroup?.toLowerCase() === 'room' || 
+    item.customCategory?.toLowerCase() === 'room'
+  );
+
   const isFormValid = 
     isValidPhone(customerPhone) && 
-    (orderType !== 'Delivery' || deliveryAddress.trim() !== '');
+    (hasRoomItem 
+      ? /^\d{12}$/.test(aadhaarNumber.trim()) 
+      : (orderType !== 'Delivery' || deliveryAddress.trim() !== '')
+    );
 
   // --- BILL CALCULATION LOGIC ---
   const calculateBill = () => {
@@ -407,19 +417,30 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
     if (cart.length === 0) return;
     
     if (!isFormValid) {
-      if (orderType === 'Delivery') {
-        if (!/^\d{10}$/.test(customerPhone.trim())) {
-          toast.error("Please enter a valid 10-digit Phone Number for Delivery.");
+      if (hasRoomItem) {
+        if (!/^\d{12}$/.test(aadhaarNumber.trim())) {
+          toast.error("Please enter a valid 12-digit Aadhaar Number.");
           return;
         }
-        if (deliveryAddress.trim() === '') {
-          toast.error("Please enter a Delivery Address.");
-          return;
-        }
-      } else {
         if (customerPhone.trim() !== '' && !/^\d{10}$/.test(customerPhone.trim())) {
           toast.error("Please enter a valid 10-digit Phone Number.");
           return;
+        }
+      } else {
+        if (orderType === 'Delivery') {
+          if (!/^\d{10}$/.test(customerPhone.trim())) {
+            toast.error("Please enter a valid 10-digit Phone Number for Delivery.");
+            return;
+          }
+          if (deliveryAddress.trim() === '') {
+            toast.error("Please enter a Delivery Address.");
+            return;
+          }
+        } else {
+          if (customerPhone.trim() !== '' && !/^\d{10}$/.test(customerPhone.trim())) {
+            toast.error("Please enter a valid 10-digit Phone Number.");
+            return;
+          }
         }
       }
       return;
@@ -476,7 +497,8 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
             tableNo: orderType === 'Dine-in' ? 'Walk-in' : 'N/A',
             customerName: customerName || 'Guest',
             customerPhone: customerPhone || 'N/A',
-            deliveryAddress: orderType === 'Delivery' ? deliveryAddress : '',
+            deliveryAddress: (orderType === 'Delivery' && !hasRoomItem) ? deliveryAddress : '',
+            aadhaarNumber: hasRoomItem ? aadhaarNumber : '',
             isNewCustomer: customerPhone.trim() !== '' && customerStats ? customerStats.isNewCustomer : false
           };
 
@@ -537,6 +559,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       setCustomerName('');
       setCustomerPhone('');
       setDeliveryAddress('');
+      setAadhaarNumber('');
       setCustomerStats(null);
       
       setCart([]); 
@@ -956,8 +979,25 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
                 </div>
             </div>
             
+            {/* Aadhaar Number input for Room items */}
+            {hasRoomItem && (
+                <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Fingerprint className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input 
+                        type="text"
+                        maxLength={12}
+                        className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-[#FF5722] focus:border-[#FF5722] outline-none transition-all" 
+                        placeholder="Customer Aadhaar Number"
+                        value={aadhaarNumber}
+                        onChange={e => setAadhaarNumber(e.target.value.replace(/\D/g, ''))}
+                    />
+                </div>
+            )}
+            
             {/* Delivery Address Input */}
-            {orderType === 'Delivery' && (
+            {orderType === 'Delivery' && !hasRoomItem && (
                 <div className="relative">
                     <textarea 
                         className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-[#FF5722] focus:border-[#FF5722] outline-none transition-all resize-none shadow-inner" 
