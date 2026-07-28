@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { collection, onSnapshot, updateDoc, doc, query, deleteDoc, getDoc, where, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, updateDoc, doc, query, deleteDoc, getDoc, where, getDocs, getDocsFromCache } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Order, OrderStatus, Restaurant, RolePermissions } from '../types';
 import { Trash2, AlertTriangle, Globe, Monitor, Printer, Download, User, Loader2, Plus } from 'lucide-react';
@@ -208,13 +208,27 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           }
           historyQuery = query(ordersRef, ...conditions);
         } else {
-          // By default load last 30 days orders using one-time fetch (mostly fulfilled by local cache)
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          historyQuery = query(ordersRef, where('createdAt', '>=', thirtyDaysAgo.toISOString()));
+          // By default load ALL orders (without 30 days restriction) using local browser cache first
+          historyQuery = query(ordersRef);
         }
 
-        const snapshot = await getDocs(historyQuery);
+        let snapshot;
+        try {
+          // Attempt cache-first fetch (0 reads cost on Firebase billing)
+          snapshot = await getDocsFromCache(historyQuery);
+          console.log(`[FIREBASE CACHE] Loaded ${snapshot.size} history orders from browser cache.`);
+          
+          // If cache is empty, fall back to server fetch to warm up cache
+          if (snapshot.empty) {
+            snapshot = await getDocs(historyQuery);
+            console.log(`[FIREBASE SERVER] Cache was empty. Loaded ${snapshot.size} history orders from server.`);
+          }
+        } catch (cacheErr) {
+          // Fallback to server if cache fetch throws error
+          snapshot = await getDocs(historyQuery);
+          console.log(`[FIREBASE SERVER] Cache query failed. Loaded ${snapshot.size} history orders from server.`);
+        }
+
         historyOrders = snapshot.docs.map(doc => ({
           id: doc.id,
           ...(doc.data() as object)
