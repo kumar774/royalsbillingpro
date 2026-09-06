@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { ThemeSettings, SocialLinks } from '../types';
-import { Save, Loader2, Layout, Share2, Globe, Trash2, Database, Download, Sparkles, Smartphone, Monitor, ShieldAlert } from 'lucide-react';
+import { Save, Loader2, Layout, Share2, Globe, Trash2, Database, Download, Sparkles, Smartphone, Monitor, ShieldAlert, Lock, CheckCircle, X, Key } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { cleanupDeprecatedSettings, getUnusedSettingsCount, cleanupRestaurantFields } from '../src/utils/dbCleanup';
 import { generateFullBackup, downloadBackup } from '../src/utils/backup';
+import MasterAppManager from '../components/MasterAppManager';
 
 const COLOR_PRESETS = [
   { name: 'Sunset Orange', primary: '#ea580c', bg: '#f9fafb', text: '#111827' },
@@ -19,8 +20,42 @@ const Settings: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
-  const [activeTab, setActiveTab] = useState<'theme' | 'hero' | 'features' | 'links' | 'system'>('theme');
+  const [activeTab, setActiveTab] = useState<'theme' | 'hero' | 'features' | 'links' | 'system' | 'apps'>('theme');
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
+
+  // Master Secret Passcode State (ROYALS@DDMMYYYY)
+  const [isMasterUnlocked, setIsMasterUnlocked] = useState(() => {
+    return sessionStorage.getItem('master_app_unlocked') === 'true';
+  });
+  const [showSecretModal, setShowSecretModal] = useState(false);
+  const [secretInput, setSecretInput] = useState('');
+  const [secretError, setSecretError] = useState(false);
+
+  const verifySecretCode = (input: string): boolean => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const todayCode = `ROYALS@${day}${month}${year}`;
+    const altTodayCode = `ROYAL@${day}${month}${year}`;
+
+    const cleanInput = input.trim().toUpperCase();
+    return cleanInput === todayCode || cleanInput === altTodayCode;
+  };
+
+  const handleTabClick = (tabId: string) => {
+    if (tabId === 'apps') {
+      if (isMasterUnlocked) {
+        setActiveTab('apps');
+      } else {
+        setSecretInput('');
+        setSecretError(false);
+        setShowSecretModal(true);
+      }
+    } else {
+      setActiveTab(tabId as any);
+    }
+  };
   
   const [formData, setFormData] = useState({
     theme: {
@@ -190,7 +225,48 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      {/* Dynamic Master App Manager View */}
+      {activeTab === 'apps' && isMasterUnlocked ? (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-150 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveTab('theme')}
+                className="px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold transition flex items-center gap-1.5"
+              >
+                ← Back to General Settings
+              </button>
+              <span className="text-gray-300">|</span>
+              <span className="text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-full flex items-center gap-1 border border-green-200">
+                <CheckCircle className="h-3.5 w-3.5 text-green-600" /> Master Passcode Verified
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsMasterUnlocked(false);
+                sessionStorage.removeItem('master_app_unlocked');
+                setActiveTab('theme');
+                toast.success('Master panel locked.');
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-gray-900 hover:bg-black text-white text-xs font-bold transition flex items-center gap-1.5"
+            >
+              <Lock className="h-3.5 w-3.5" /> Lock Session
+            </button>
+          </div>
+
+          <MasterAppManager
+            onLockSession={() => {
+              setIsMasterUnlocked(false);
+              sessionStorage.removeItem('master_app_unlocked');
+              setActiveTab('theme');
+              toast.success('Master session locked.');
+            }}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Left Column: Form & Tab Navigation */}
         <div className="lg:col-span-8 space-y-6">
           <div className="bg-white rounded-3xl shadow-sm border border-gray-150 overflow-hidden flex flex-col md:flex-row min-h-[600px]">
@@ -202,19 +278,23 @@ const Settings: React.FC = () => {
                 { id: 'hero', label: '🚀 Hero Layout' },
                 { id: 'features', label: '✨ About & Cards' },
                 { id: 'links', label: '🔗 Footer Links' },
-                { id: 'system', label: '⚙️ Maintenance' }
+                { id: 'system', label: '⚙️ Maintenance' },
+                { id: 'apps', label: '🛡️ Master Apps' }
               ].map(tab => (
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-0 outline-none ${
+                  onClick={() => handleTabClick(tab.id)}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer border-0 outline-none flex items-center justify-between ${
                     activeTab === tab.id 
                       ? 'bg-orange-50 text-orange-700 border-l-4 border-orange-600' 
                       : 'text-gray-600 hover:bg-gray-100 border-l-4 border-transparent bg-transparent'
                   }`}
                 >
-                  {tab.label}
+                  <span>{tab.label}</span>
+                  {tab.id === 'apps' && (
+                    <Lock className={`h-3 w-3 ${isMasterUnlocked ? 'text-green-600' : 'text-gray-400'}`} />
+                  )}
                 </button>
               ))}
             </div>
@@ -730,6 +810,7 @@ const Settings: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* Custom Confirmation Modal */}
       {showCleanupModal && (
@@ -767,6 +848,76 @@ const Settings: React.FC = () => {
                 Confirm Sweep
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Secret Passcode Unlock Modal */}
+      {showSecretModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-[100] p-4 backdrop-blur-sm animate-fade-in">
+          <div className="bg-gray-900 border border-gray-800 text-white rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl text-center">
+            <div className="w-14 h-14 bg-orange-500/10 text-orange-400 rounded-2xl flex items-center justify-center mx-auto border border-orange-500/20">
+              <Key className="h-7 w-7" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-white">Master Security Access</h3>
+              <p className="text-xs text-gray-400 mt-1">Enter today's dynamic security passcode to access master app controls.</p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (verifySecretCode(secretInput)) {
+                  setIsMasterUnlocked(true);
+                  sessionStorage.setItem('master_app_unlocked', 'true');
+                  setActiveTab('apps');
+                  setShowSecretModal(false);
+                  toast.success('Security verified! Master panel unlocked.');
+                } else {
+                  setSecretError(true);
+                  toast.error('Incorrect Secret Passcode!');
+                }
+              }}
+              className="space-y-4"
+            >
+              <input
+                type="password"
+                autoFocus
+                placeholder="ROYALS@DDMMYYYY"
+                value={secretInput}
+                onChange={(e) => {
+                  setSecretInput(e.target.value);
+                  setSecretError(false);
+                }}
+                className={`w-full px-4 py-3 bg-gray-800 border text-center font-mono text-sm tracking-wider rounded-xl focus:outline-none transition ${
+                  secretError
+                    ? 'border-red-500 ring-2 ring-red-500/20'
+                    : 'border-gray-700 focus:border-orange-500 focus:ring-1 focus:ring-orange-500'
+                }`}
+              />
+
+              {secretError && (
+                <p className="text-[11px] text-red-400 font-medium animate-pulse">
+                  Invalid passcode. Format: ROYALS@DDMMYYYY
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowSecretModal(false)}
+                  className="flex-1 py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-400 text-xs font-bold rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-[#FF5722] hover:bg-[#F4511E] text-white text-xs font-bold rounded-xl transition shadow-lg active:scale-95"
+                >
+                  Unlock Panel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
