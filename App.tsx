@@ -12,13 +12,15 @@ import { ProtectedRoute, GuestRoute } from './components/ProtectedRoute';
 
 import LandingPage from './pages/LandingPage';
 import PullToRefresh from './components/PullToRefresh';
+import AppLicenseGuard from './components/AppLicenseGuard';
 
 const App: React.FC = () => {
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrCodeValue, setQrCodeValue] = useState('');
   return (
     <Router>
-      <ThemeProvider>
+      <AppLicenseGuard>
+        <ThemeProvider>
         <AuthProvider>
           <Toaster 
             position="top-right"
@@ -103,9 +105,9 @@ const App: React.FC = () => {
           </RestaurantProvider>
         </AuthProvider>
       </ThemeProvider>
+      </AppLicenseGuard>
     </Router>
   );
 };
 
 export default App;
-
