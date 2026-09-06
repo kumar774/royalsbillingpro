@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, updateDoc, doc, query, deleteDoc, getDoc, where, getDocs, getDocsFromCache } from 'firebase/firestore';
 import { db } from '../firebase/config';
@@ -24,6 +24,10 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
   const [endDate, setEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [restaurantData, setRestaurantData] = useState<Restaurant | null>(null);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const liveOrdersRef = useRef<Map<string, Order>>(new Map());
+  const historyOrdersRef = useRef<Map<string, Order>>(new Map());
 
   useEffect(() => {
     if (initialFilter) {
@@ -156,37 +160,47 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     }
   }, [restaurantId]);
 
+  const syncOrdersToState = () => {
+    const mergedMap = new Map<string, Order>();
+    historyOrdersRef.current.forEach((order, id) => {
+      mergedMap.set(id, order);
+    });
+    // Live orders override historical entries with latest live values
+    liveOrdersRef.current.forEach((order, id) => {
+      mergedMap.set(id, order);
+    });
+
+    const merged = Array.from(mergedMap.values());
+    merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    setOrders(merged);
+  };
+
   useEffect(() => {
     if (!restaurantId) return;
 
     const ordersRef = collection(db, 'restaurants', restaurantId, 'orders');
 
-    // 1. Live Snapshot Query: Strictly listen to today's orders to catch incoming orders in real-time
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const liveQuery = query(ordersRef, where('createdAt', '>=', todayStart.toISOString()));
+    // 1. Live Snapshot Query: Listen to last 48 hours so today's orders & yesterday evening's orders
+    // always receive instant real-time sync on mobile without missing timezone offsets
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setHours(0, 0, 0, 0);
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 1);
+    const liveQuery = query(ordersRef, where('createdAt', '>=', twoDaysAgo.toISOString()));
 
-    let liveOrders: Order[] = [];
-    let historyOrders: Order[] = [];
-
-    const mergeAndSortOrders = () => {
-      // Merge live and historical orders, removing duplicates
-      const orderMap = new Map<string, Order>();
-      historyOrders.forEach(o => orderMap.set(o.id, o));
-      liveOrders.forEach(o => orderMap.set(o.id, o));
-
-      const merged = Array.from(orderMap.values());
-      merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setOrders(merged);
-    };
-
-    // Attach real-time listener for today's orders
+    // Attach real-time listener for recent orders
     const unsubscribeLive = onSnapshot(liveQuery, (snapshot) => {
-      liveOrders = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Order[];
-      mergeAndSortOrders();
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          liveOrdersRef.current.delete(change.doc.id);
+          historyOrdersRef.current.delete(change.doc.id);
+        } else {
+          liveOrdersRef.current.set(change.doc.id, {
+            id: change.doc.id,
+            ...change.doc.data()
+          } as Order);
+        }
+      });
+      syncOrdersToState();
     });
 
     // 2. Historical Fetch Query: Fetch older orders (one-time) using client-side cache first to save read costs
@@ -208,7 +222,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           }
           historyQuery = query(ordersRef, ...conditions);
         } else {
-          // By default load ALL orders (without 30 days restriction) using local browser cache first
+          // By default load ALL orders from local browser cache first
           historyQuery = query(ordersRef);
         }
 
@@ -223,17 +237,19 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
             snapshot = await getDocs(historyQuery);
             console.log(`[FIREBASE SERVER] Cache was empty. Loaded ${snapshot.size} history orders from server.`);
           }
-        } catch (cacheErr) {
+        } catch {
           // Fallback to server if cache fetch throws error
           snapshot = await getDocs(historyQuery);
           console.log(`[FIREBASE SERVER] Cache query failed. Loaded ${snapshot.size} history orders from server.`);
         }
 
-        historyOrders = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...(doc.data() as object)
-        })) as Order[];
-        mergeAndSortOrders();
+        snapshot.docs.forEach(doc => {
+          historyOrdersRef.current.set(doc.id, {
+            id: doc.id,
+            ...(doc.data() as object)
+          } as Order);
+        });
+        syncOrdersToState();
       } catch (err) {
         console.error("Error fetching historical orders:", err);
       }
@@ -252,6 +268,17 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       return;
     }
     if (!restaurantId) return;
+
+    // 1. Instant optimistic state update for 0ms UI response on mobile
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+    if (liveOrdersRef.current.has(orderId)) {
+      liveOrdersRef.current.set(orderId, { ...liveOrdersRef.current.get(orderId)!, status: newStatus });
+    }
+    if (historyOrdersRef.current.has(orderId)) {
+      historyOrdersRef.current.set(orderId, { ...historyOrdersRef.current.get(orderId)!, status: newStatus });
+    }
+
+    setUpdatingOrderId(orderId);
     try {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', orderId);
       await updateDoc(orderRef, { status: newStatus });
@@ -273,8 +300,12 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           ).catch(err => console.error("Telegram notification failed:", err));
         }
       }
-    } catch {
-      // console.error("Failed to update status", err);
+    } catch (err) {
+      console.error("Failed to update status", err);
+      toast.error("Failed to sync status with server");
+      syncOrdersToState();
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -296,16 +327,29 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         return;
       }
       if (!restaurantId || !orderToCancel) return;
+      const targetId = orderToCancel;
+
+      // 1. Instant optimistic cancel
+      setOrders(prev => prev.map(o => o.id === targetId ? { ...o, status: 'Cancelled' } : o));
+      if (liveOrdersRef.current.has(targetId)) {
+        liveOrdersRef.current.set(targetId, { ...liveOrdersRef.current.get(targetId)!, status: 'Cancelled' });
+      }
+      if (historyOrdersRef.current.has(targetId)) {
+        historyOrdersRef.current.set(targetId, { ...historyOrdersRef.current.get(targetId)!, status: 'Cancelled' });
+      }
+      setShowCancelModal(false);
+      setOrderToCancel(null);
+
       const toastId = toast.loading("Cancelling order...");
       try {
-          const orderRef = doc(db, 'restaurants', restaurantId, 'orders', orderToCancel);
+          const orderRef = doc(db, 'restaurants', restaurantId, 'orders', targetId);
           await updateDoc(orderRef, { status: 'Cancelled' });
 
           // Send Telegram Notification
           if (restaurantData?.notificationSettings?.orderStatusUpdate && 
               restaurantData?.notificationSettings?.telegramToken && 
               restaurantData?.notificationSettings?.telegramChatId) {
-            const order = orders.find(o => o.id === orderToCancel);
+            const order = orders.find(o => o.id === targetId);
             if (order) {
               const message = `❌ <b>Order Cancelled</b>\n\n` +
                               `<b>Order:</b> #${escapeHtml(order.formattedId || order.id.slice(-5))}\n` +
@@ -320,11 +364,10 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           }
 
           toast.success("Order cancelled", { id: toastId });
-          setShowCancelModal(false);
-          setOrderToCancel(null);
       } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           toast.error("Failed to cancel order: " + message, { id: toastId });
+          syncOrdersToState();
       }
   };
 
@@ -334,14 +377,21 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         return;
       }
       if (!restaurantId || !orderToDelete) return;
+      const targetId = orderToDelete;
+      const order = orders.find(o => o.id === targetId);
+
+      // 1. Instant optimistic removal from UI and cache maps
+      setOrders(prev => prev.filter(o => o.id !== targetId));
+      liveOrdersRef.current.delete(targetId);
+      historyOrdersRef.current.delete(targetId);
+
+      setShowDeleteModal(false);
+      setOrderToDelete(null);
+
       const toastId = toast.loading("Deleting order...");
       try {
-          const order = orders.find(o => o.id === orderToDelete);
-
-          await deleteDoc(doc(db, 'restaurants', restaurantId, 'orders', orderToDelete));
+          await deleteDoc(doc(db, 'restaurants', restaurantId, 'orders', targetId));
           toast.success("Order deleted successfully", { id: toastId });
-          setShowDeleteModal(false);
-          setOrderToDelete(null);
 
           // Send Telegram Notification for Deletion
           if (order && 
@@ -362,6 +412,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       } catch (err) {
           const message = err instanceof Error ? err.message : "Unknown error";
           toast.error("Failed to delete order: " + message, { id: toastId });
+          syncOrdersToState();
       }
   };
 
@@ -417,6 +468,17 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       return;
     }
     if (!restaurantId) return;
+
+    // Instant optimistic update
+    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, paymentStatus: 'Paid' } : o));
+    if (liveOrdersRef.current.has(order.id)) {
+      liveOrdersRef.current.set(order.id, { ...liveOrdersRef.current.get(order.id)!, paymentStatus: 'Paid' });
+    }
+    if (historyOrdersRef.current.has(order.id)) {
+      historyOrdersRef.current.set(order.id, { ...historyOrdersRef.current.get(order.id)!, paymentStatus: 'Paid' });
+    }
+
+    setUpdatingOrderId(order.id);
     try {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', order.id);
       await updateDoc(orderRef, { paymentStatus: 'Paid' });
@@ -717,9 +779,10 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                     {order.paymentStatus !== 'Paid' && order.status !== 'Cancelled' && (
                       <button 
                         onClick={() => handleMarkAsPaid(order)} 
-                        disabled={permissions !== undefined && !permissions.orders.edit}
-                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
+                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark as Paid
                       </button>
                     )}
@@ -732,34 +795,37 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                     {order.status === 'Pending' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Preparing')} 
-                        disabled={permissions !== undefined && !permissions.orders.edit}
-                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
+                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Preparing
                       </button>
                     )}
                     {order.status === 'Preparing' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Ready')} 
-                        disabled={permissions !== undefined && !permissions.orders.edit}
-                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
+                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Ready
                       </button>
                     )}
                     {order.status === 'Ready' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Completed')} 
-                        disabled={permissions !== undefined && !permissions.orders.edit}
-                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-green-500 text-white hover:bg-green-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        className="w-full py-2.5 text-sm font-bold rounded-xl bg-green-500 text-white hover:bg-green-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
+                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Completed
                       </button>
                     )}
                     {order.status !== 'Completed' && order.status !== 'Cancelled' && (
                       <button 
                         onClick={() => confirmCancel(order.id)} 
-                        disabled={permissions !== undefined && !permissions.orders.edit}
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Cancel Order
