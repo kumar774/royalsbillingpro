@@ -24,7 +24,8 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
   const [endDate, setEndDate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [restaurantData, setRestaurantData] = useState<Restaurant | null>(null);
-  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  const [updatingStatusOrderId, setUpdatingStatusOrderId] = useState<string | null>(null);
+  const [updatingPaymentOrderId, setUpdatingPaymentOrderId] = useState<string | null>(null);
 
   const liveOrdersRef = useRef<Map<string, Order>>(new Map());
   const historyOrdersRef = useRef<Map<string, Order>>(new Map());
@@ -302,7 +303,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       historyOrdersRef.current.set(orderId, { ...historyOrdersRef.current.get(orderId)!, status: newStatus });
     }
 
-    setUpdatingOrderId(orderId);
+    setUpdatingStatusOrderId(orderId);
     try {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', orderId);
       await updateDoc(orderRef, { status: newStatus });
@@ -329,7 +330,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       toast.error("Failed to sync status with server");
       syncOrdersToState();
     } finally {
-      setUpdatingOrderId(null);
+      setUpdatingStatusOrderId(null);
     }
   };
 
@@ -512,7 +513,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       historyOrdersRef.current.set(order.id, { ...historyOrdersRef.current.get(order.id)!, paymentStatus: 'Paid' });
     }
 
-    setUpdatingOrderId(order.id);
+    setUpdatingPaymentOrderId(order.id);
     try {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', order.id);
       await updateDoc(orderRef, { paymentStatus: 'Paid' });
@@ -562,6 +563,8 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       toast.success("Payment marked as Paid");
     } catch {
       toast.error("Failed to update payment status");
+    } finally {
+      setUpdatingPaymentOrderId(null);
     }
   };
 
@@ -813,10 +816,10 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                     {order.paymentStatus !== 'Paid' && order.status !== 'Cancelled' && (
                       <button 
                         onClick={() => handleMarkAsPaid(order)} 
-                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingPaymentOrderId === order.id}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-orange-500 text-white hover:bg-orange-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {updatingPaymentOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark as Paid
                       </button>
                     )}
@@ -829,37 +832,37 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                     {order.status === 'Pending' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Preparing')} 
-                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingStatusOrderId === order.id}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-blue-500 text-white hover:bg-blue-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {updatingStatusOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Preparing
                       </button>
                     )}
                     {order.status === 'Preparing' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Ready')} 
-                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingStatusOrderId === order.id}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-purple-500 text-white hover:bg-purple-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {updatingStatusOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Ready
                       </button>
                     )}
                     {order.status === 'Ready' && (
                       <button 
                         onClick={() => updateStatus(order.id, 'Completed')} 
-                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingStatusOrderId === order.id}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-green-500 text-white hover:bg-green-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
-                        {updatingOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {updatingStatusOrderId === order.id && <Loader2 className="h-4 w-4 animate-spin" />}
                         Mark Completed
                       </button>
                     )}
                     {order.status !== 'Completed' && order.status !== 'Cancelled' && (
                       <button 
                         onClick={() => confirmCancel(order.id)} 
-                        disabled={(permissions !== undefined && !permissions.orders.edit) || updatingOrderId === order.id}
+                        disabled={permissions !== undefined && !permissions.orders.edit}
                         className="w-full py-2.5 text-sm font-bold rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Cancel Order
