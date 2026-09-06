@@ -28,6 +28,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
 
   const liveOrdersRef = useRef<Map<string, Order>>(new Map());
   const historyOrdersRef = useRef<Map<string, Order>>(new Map());
+  const deletedOrderIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (initialFilter) {
@@ -163,11 +164,15 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
   const syncOrdersToState = () => {
     const mergedMap = new Map<string, Order>();
     historyOrdersRef.current.forEach((order, id) => {
-      mergedMap.set(id, order);
+      if (!deletedOrderIdsRef.current.has(id)) {
+        mergedMap.set(id, order);
+      }
     });
     // Live orders override historical entries with latest live values
     liveOrdersRef.current.forEach((order, id) => {
-      mergedMap.set(id, order);
+      if (!deletedOrderIdsRef.current.has(id)) {
+        mergedMap.set(id, order);
+      }
     });
 
     const merged = Array.from(mergedMap.values());
@@ -189,17 +194,30 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
 
     // Attach real-time listener for recent orders
     const unsubscribeLive = onSnapshot(liveQuery, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'removed') {
-          liveOrdersRef.current.delete(change.doc.id);
-          historyOrdersRef.current.delete(change.doc.id);
-        } else {
-          liveOrdersRef.current.set(change.doc.id, {
-            id: change.doc.id,
-            ...change.doc.data()
+      const newLiveMap = new Map<string, Order>();
+      snapshot.docs.forEach((doc) => {
+        if (!deletedOrderIdsRef.current.has(doc.id)) {
+          newLiveMap.set(doc.id, {
+            id: doc.id,
+            ...doc.data()
           } as Order);
+          // Also keep historyOrdersRef in sync so it never has a stale version
+          if (historyOrdersRef.current.has(doc.id)) {
+            historyOrdersRef.current.set(doc.id, {
+              id: doc.id,
+              ...doc.data()
+            } as Order);
+          }
         }
       });
+      // Any order that was in liveOrdersRef but is now absent from snapshot was deleted from Firestore
+      liveOrdersRef.current.forEach((_, id) => {
+        if (!newLiveMap.has(id)) {
+          historyOrdersRef.current.delete(id);
+          deletedOrderIdsRef.current.add(id);
+        }
+      });
+      liveOrdersRef.current = newLiveMap;
       syncOrdersToState();
     });
 
@@ -244,6 +262,11 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         }
 
         snapshot.docs.forEach(doc => {
+          // Never re-add deleted orders
+          if (deletedOrderIdsRef.current.has(doc.id)) return;
+          // Never overwrite live/fresh orders with stale cached copies!
+          if (liveOrdersRef.current.has(doc.id)) return;
+
           historyOrdersRef.current.set(doc.id, {
             id: doc.id,
             ...(doc.data() as object)
@@ -268,6 +291,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       return;
     }
     if (!restaurantId) return;
+    if (deletedOrderIdsRef.current.has(orderId)) return;
 
     // 1. Instant optimistic state update for 0ms UI response on mobile
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
@@ -328,6 +352,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       }
       if (!restaurantId || !orderToCancel) return;
       const targetId = orderToCancel;
+      if (deletedOrderIdsRef.current.has(targetId)) return;
 
       // 1. Instant optimistic cancel
       setOrders(prev => prev.map(o => o.id === targetId ? { ...o, status: 'Cancelled' } : o));
@@ -380,10 +405,15 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       const targetId = orderToDelete;
       const order = orders.find(o => o.id === targetId);
 
-      // 1. Instant optimistic removal from UI and cache maps
-      setOrders(prev => prev.filter(o => o.id !== targetId));
+      // 1. Permanently register this ID in deletedOrderIdsRef
+      deletedOrderIdsRef.current.add(targetId);
+
+      // 2. Remove from both in-memory cache maps
       liveOrdersRef.current.delete(targetId);
       historyOrdersRef.current.delete(targetId);
+
+      // 3. Instant optimistic removal from UI state
+      setOrders(prev => prev.filter(o => o.id !== targetId));
 
       setShowDeleteModal(false);
       setOrderToDelete(null);
@@ -410,8 +440,11 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
             ).catch(err => console.error("Telegram notification failed:", err));
           }
       } catch (err) {
+          console.error("Failed to delete order:", err);
           const message = err instanceof Error ? err.message : "Unknown error";
           toast.error("Failed to delete order: " + message, { id: toastId });
+          // If server call truly failed, allow it back
+          deletedOrderIdsRef.current.delete(targetId);
           syncOrdersToState();
       }
   };
@@ -468,6 +501,7 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       return;
     }
     if (!restaurantId) return;
+    if (deletedOrderIdsRef.current.has(order.id)) return;
 
     // Instant optimistic update
     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, paymentStatus: 'Paid' } : o));
