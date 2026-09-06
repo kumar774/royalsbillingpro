@@ -139,6 +139,22 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
   const [allRestaurantsData, setAllRestaurantsData] = useState<Record<string, { orders: Order[], expenses: Expense[] }>>({});
   const [isMergedView, setIsMergedView] = useState(false);
   const [timeframe, setTimeframe] = useState<'today' | '7days' | 'month' | 'all'>('today');
+
+  // Dynamic Restaurant Resolution for "current" or "active" (Webview & Mobile Navigation)
+  useEffect(() => {
+    if (restaurantId === 'current' || restaurantId === 'active') {
+      if (restaurants.length > 0) {
+        const savedId = localStorage.getItem('lastActiveRestaurantId');
+        const target = restaurants.find(r => r.id === savedId) || restaurants[0];
+        if (target) {
+          const suffix = view === 'overview' ? '' : `/${view}`;
+          navigate(`/dashboard/${target.id}${suffix}`, { replace: true });
+        }
+      }
+    } else if (restaurantId) {
+      localStorage.setItem('lastActiveRestaurantId', restaurantId);
+    }
+  }, [restaurantId, restaurants, view, navigate]);
   
   // Colors for Charts
   const COLORS = [
@@ -533,12 +549,14 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
     }
   })();
 
-  if (loadingPermissions) {
+  if (loadingPermissions || restaurantId === 'current' || restaurantId === 'active') {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="flex flex-col items-center space-y-3">
           <Loader2 className="animate-spin h-10 w-10 text-orange-500" />
-          <p className="text-gray-500 font-semibold text-sm">Loading permissions...</p>
+          <p className="text-gray-500 font-semibold text-sm">
+            {restaurantId === 'current' || restaurantId === 'active' ? 'Loading active restaurant...' : 'Loading permissions...'}
+          </p>
         </div>
       </div>
     );
@@ -618,7 +636,11 @@ const Dashboard: React.FC<DashboardProps> = ({ view }) => {
                    restaurants.map((r, index) => (
                      <React.Fragment key={r.id}>
                        <button 
-                         onClick={() => navigate(`/dashboard/${r.id}`)}
+                         onClick={() => {
+                           localStorage.setItem('lastActiveRestaurantId', r.id);
+                           const suffix = view === 'overview' ? '' : `/${view}`;
+                           navigate(`/dashboard/${r.id}${suffix}`);
+                         }}
                          className={`text-sm transition-colors ${r.id === restaurantId ? 'font-bold text-orange-600' : 'text-gray-500 hover:text-gray-900 font-medium'}`}
                        >
                          {r.name}
