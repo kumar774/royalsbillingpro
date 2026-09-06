@@ -280,3 +280,30 @@ export interface RolePermissions {
   customers: ModulePermission;
   settings: ModulePermission;
 }
+
+export interface ManagedApp {
+  id: string;
+  appName: string;
+  appId: string;
+  packageName: string;
+  appVersion: string;
+  minRequiredVersion?: string;
+  updateUrl?: string;
+  forceUpdateMessage?: string;
+  status: 'active' | 'suspended' | 'expired';
+  expiryDate: string;
+  isLifetime: boolean;
+  redirectUrl?: string;
+  lockMessage?: string;
+  warningDaysBeforeExpiry?: number;
+  warningNoticeText?: string;
+  maxAllowedDevices?: number;
+  registeredDevices?: string[];
+  maintenanceMode?: boolean;
+  maintenanceMessage?: string;
+  announcementNotice?: string;
+  showAnnouncement?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
