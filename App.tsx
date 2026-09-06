@@ -11,6 +11,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, GuestRoute } from './components/ProtectedRoute';
 
 import LandingPage from './pages/LandingPage';
+import PullToRefresh from './components/PullToRefresh';
 
 const App: React.FC = () => {
   const [showQrModal, setShowQrModal] = useState(false);
@@ -43,8 +44,20 @@ const App: React.FC = () => {
               },
             }}
           />
+          <PullToRefresh />
           <RestaurantProvider>
             <Routes>
+              {/* Dynamic Shortcut Routes (Always resolve to active restaurant) */}
+              <Route path="/dashboard" element={<Navigate to="/dashboard/current" replace />} />
+              <Route path="/orders" element={<Navigate to="/dashboard/current/orders" replace />} />
+              <Route path="/pos" element={<Navigate to="/dashboard/current/pos" replace />} />
+              <Route path="/menu" element={<Navigate to="/dashboard/current/menu" replace />} />
+              <Route path="/expenses" element={<Navigate to="/dashboard/current/expenses" replace />} />
+              <Route path="/reports" element={<Navigate to="/dashboard/current/reports" replace />} />
+              <Route path="/staff" element={<Navigate to="/dashboard/current/staff" replace />} />
+              <Route path="/customers" element={<Navigate to="/dashboard/current/customers" replace />} />
+              <Route path="/settings" element={<Navigate to="/dashboard/current/settings" replace />} />
+
               {/* Admin / Auth Routes */}
               <Route path="/login" element={
                 <GuestRoute>
