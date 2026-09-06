@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment, getDoc, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { MenuItem, CartItem, OrderType, Restaurant, PaymentMethod, Variant, Order, TaxSettings, RolePermissions } from '../types';
-import { Search, Plus, Minus, Trash2, CreditCard, Loader2, Fingerprint, Printer, MessageSquare, CheckCircle, User, Phone, Wallet, QrCode, Tag, X, Bike, Utensils, ShoppingBag, Receipt, Copy, Download } from 'lucide-react';
+import { Search, Plus, Minus, Trash2, CreditCard, Loader2, Fingerprint, Printer, MessageSquare, CheckCircle, User, Phone, Wallet, QrCode, Tag, X, Bike, Utensils, ShoppingBag, Receipt, Copy, Download, ChevronRight } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from 'react-hot-toast';
 import { generateProfessionalReceipt } from '../components/ReceiptPDF';
@@ -82,6 +82,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
   const [tempCategoryOrder, setTempCategoryOrder] = useState<string[]>([]);
   const [showImages, setShowImages] = useState(true);
   const [visibleCount, setVisibleCount] = useState(10);
+  const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
 
   const printReceipt = async (order: LastOrderDetails) => {
     if (!restaurantData) return;
@@ -349,6 +350,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       setDeliveryCharge(0);
       setShowBillModal(false);
       setLastOrderDetails(null);
+      setIsMobileCartOpen(false);
   };
 
   const isValidPhone = (phone: string) => {
@@ -418,6 +420,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
   };
 
   const { subtotal, discountAmount, gstAmount, serviceAmount, total, gstRate, serviceRate, activeDeliveryCharge } = calculateBill();
+  const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const handlePlaceOrder = async () => {
     if (permissions && !permissions.pos.add) {
@@ -576,6 +579,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       setCart([]); 
       toast.success("Orders placed successfully!", { id: toastId });
       setShowBillModal(true);
+      setIsMobileCartOpen(false);
       
     } catch (err) {
       console.error("POS Order Failed", err);
@@ -770,7 +774,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       
       {/* Success Modal */}
       {showBillModal && lastOrderDetails && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm modal-overlay animate-fade-in p-4">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm modal-overlay animate-fade-in p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
                   <div className="bg-orange-600 p-4 flex justify-between items-center text-white flex-shrink-0">
                       <h3 className="font-bold text-lg flex items-center"><CheckCircle className="mr-2 h-5 w-5" /> Order Placed</h3>
@@ -862,11 +866,11 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
       )}
 
       {/* Main Content (Product Grid) */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-gray-50 max-w-[calc(100%-400px)]" id="no-print">
+      <div className="flex-1 flex flex-col overflow-hidden bg-gray-50 w-full lg:max-w-[calc(100%-400px)] pb-20 lg:pb-0" id="no-print">
         {/* Header Section */}
         <div className="shrink-0 bg-white p-4 border-b border-gray-200">
           {/* Search and Toggle Row */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <input 
@@ -878,7 +882,7 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
               />
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-sm font-medium text-gray-700">Show Images</span>
+              <span className="text-sm font-medium text-gray-700 hidden sm:inline">Show Images</span>
               <label className="relative inline-flex items-center cursor-pointer">
                 <input 
                   type="checkbox" 
@@ -889,6 +893,20 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
                 <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-focus:ring-2 peer-focus:ring-orange-300 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
               </label>
             </div>
+            {/* Mobile Cart Button in Header */}
+            <button
+              type="button"
+              onClick={() => setIsMobileCartOpen(true)}
+              className="lg:hidden relative p-2 rounded-lg bg-orange-50 text-[#FF5722] hover:bg-orange-100 transition shrink-0"
+              title="Open Cart"
+            >
+              <ShoppingBag className="h-5 w-5" />
+              {totalItemsCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-[#FF5722] text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                  {totalItemsCount}
+                </span>
+              )}
+            </button>
           </div>
           {/* Categories Row */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -956,11 +974,33 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
         </div>
       </div>
 
-      {/* Sidebar (Right) - FIXED UI */}
-      <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col h-full z-30 shadow-2xl relative" id="no-print">
+      {/* Sidebar (Right) - Responsive Drawer on Mobile, Fixed Sidebar on Desktop */}
+      <div 
+        className={`bg-white border-l border-gray-200 flex flex-col z-50 lg:z-30 shadow-2xl transition-all duration-300 ${
+          isMobileCartOpen 
+            ? 'fixed inset-0 h-full w-full' 
+            : 'hidden lg:flex lg:static lg:w-[400px] lg:h-full relative'
+        }`} 
+        id="no-print"
+      >
+        {/* Mobile Header with Close Button */}
+        <div className="lg:hidden flex items-center justify-between px-4 py-3 bg-gray-900 text-white shrink-0 shadow-md">
+          <div className="flex items-center space-x-2">
+            <ShoppingBag className="h-5 w-5 text-orange-400" />
+            <span className="font-bold text-base">Current Order ({totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'})</span>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setIsMobileCartOpen(false)}
+            className="p-1.5 rounded-lg bg-gray-800 text-gray-300 hover:text-white hover:bg-gray-700 transition active:scale-95"
+            aria-label="Close Cart"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
         
         {/* 1. Fixed Header Section */}
-        <div className="shrink-0 bg-white p-4 border-b border-gray-100 z-20 space-y-3">
+        <div className="shrink-0 max-h-[42vh] lg:max-h-none overflow-y-auto lg:overflow-visible bg-white p-4 border-b border-gray-100 z-20 space-y-3">
             
 
 
@@ -1269,6 +1309,39 @@ const POS: React.FC<POSProps> = ({ permissions }) => {
             </div>
         </div>
       </div>
+
+      {/* Floating Bottom Cart Bar for Mobile */}
+      {!isMobileCartOpen && cart.length > 0 && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-gray-200 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.12)] flex items-center justify-between animate-fade-in">
+          <div className="flex items-center space-x-3">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-[#FF5722]">
+                <ShoppingBag className="h-5 w-5" />
+              </div>
+              <span className="absolute -top-1.5 -right-1.5 bg-[#FF5722] text-white text-[11px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow">
+                {totalItemsCount}
+              </span>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 font-medium">
+                {totalItemsCount} {totalItemsCount === 1 ? 'item' : 'items'}
+              </div>
+              <div className="text-lg font-black text-gray-900 leading-tight">
+                {currency}{total.toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsMobileCartOpen(true)}
+            className="flex items-center space-x-1.5 bg-[#FF5722] hover:bg-[#F4511E] active:scale-95 text-white font-bold px-4 py-2.5 rounded-xl shadow-md transition-all text-sm"
+          >
+            <span>View Cart & Bill</span>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
