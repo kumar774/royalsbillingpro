@@ -14,6 +14,46 @@ export const AppLicenseGuard: React.FC<AppLicenseGuardProps> = ({ children }) =>
   const [loading, setLoading] = useState(true);
   const [deviceBlocked, setDeviceBlocked] = useState(false);
 
+  // Helper to ensure WhatsApp links trigger direct native app intent instead of loading web page
+  const formatDirectActionUrl = (url?: string | null): string => {
+    if (!url) return '';
+    const trimmed = url.trim();
+
+    if (trimmed.startsWith('whatsapp://') || trimmed.startsWith('intent:') || trimmed.startsWith('tel:') || trimmed.startsWith('mailto:')) {
+      return trimmed;
+    }
+
+    if (trimmed.includes('wa.me') || trimmed.includes('api.whatsapp.com')) {
+      try {
+        const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+        let phone = '';
+        let text = '';
+
+        if (parsed.hostname.includes('wa.me')) {
+          phone = parsed.pathname.replace(/^\/+/, '').replace(/\D/g, '');
+          text = parsed.searchParams.get('text') || '';
+        } else if (parsed.hostname.includes('whatsapp.com')) {
+          phone = (parsed.searchParams.get('phone') || '').replace(/\D/g, '');
+          text = parsed.searchParams.get('text') || '';
+        }
+
+        if (phone) {
+          return `whatsapp://send?phone=${phone}${text ? `&text=${encodeURIComponent(text)}` : ''}`;
+        }
+      } catch {
+        const phoneMatch = trimmed.match(/(?:wa\.me\/|phone=)(\d+)/);
+        const textMatch = trimmed.match(/[?&]text=([^&]+)/);
+        if (phoneMatch && phoneMatch[1]) {
+          const phone = phoneMatch[1];
+          const text = textMatch ? textMatch[1] : '';
+          return `whatsapp://send?phone=${phone}${text ? `&text=${text}` : ''}`;
+        }
+      }
+    }
+
+    return trimmed;
+  };
+
   // Helper to extract query parameter from either window.location.search or window.location.hash
   const getQueryParam = (param: string): string | null => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -185,9 +225,7 @@ export const AppLicenseGuard: React.FC<AppLicenseGuardProps> = ({ children }) =>
           </p>
           {appConfig.redirectUrl && (
             <a
-              href={appConfig.redirectUrl}
-              target="_blank"
-              rel="noreferrer"
+              href={formatDirectActionUrl(appConfig.redirectUrl)}
               className="inline-flex items-center justify-center w-full px-5 py-3 bg-[#FF5722] text-white font-bold rounded-xl text-xs shadow-md transition"
             >
               Contact Admin <ExternalLink className="h-3.5 w-3.5 ml-1.5" />
@@ -206,8 +244,8 @@ export const AppLicenseGuard: React.FC<AppLicenseGuardProps> = ({ children }) =>
     // If redirect URL is provided, redirect automatically after 2 seconds
     if (appConfig.redirectUrl) {
       setTimeout(() => {
-        window.location.href = appConfig.redirectUrl!;
-      }, 2500);
+        window.location.href = formatDirectActionUrl(appConfig.redirectUrl!);
+      }, 2000);
     }
 
     return (
@@ -225,9 +263,7 @@ export const AppLicenseGuard: React.FC<AppLicenseGuardProps> = ({ children }) =>
 
           {appConfig.redirectUrl && (
             <a
-              href={appConfig.redirectUrl}
-              target="_blank"
-              rel="noreferrer"
+              href={formatDirectActionUrl(appConfig.redirectUrl)}
               className="inline-flex items-center justify-center w-full px-6 py-3.5 bg-[#FF5722] hover:bg-[#F4511E] text-white font-bold rounded-2xl shadow-xl transition active:scale-95 text-sm"
             >
               <span>Renew Subscription Now</span>
@@ -258,9 +294,7 @@ export const AppLicenseGuard: React.FC<AppLicenseGuardProps> = ({ children }) =>
           </div>
           {appConfig.redirectUrl && (
             <a
-              href={appConfig.redirectUrl}
-              target="_blank"
-              rel="noreferrer"
+              href={formatDirectActionUrl(appConfig.redirectUrl)}
               className="underline text-white hover:text-amber-100 flex items-center text-[11px]"
             >
               Renew <ExternalLink className="h-3 w-3 ml-1" />
