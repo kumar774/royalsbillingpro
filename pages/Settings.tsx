@@ -883,7 +883,7 @@ const Settings: React.FC = () => {
               <input
                 type="password"
                 autoFocus
-                placeholder="ROYALS@DDMMYYYY"
+                
                 value={secretInput}
                 onChange={(e) => {
                   setSecretInput(e.target.value);
