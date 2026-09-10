@@ -727,13 +727,13 @@ export const MasterAppManager: React.FC<MasterAppManagerProps> = ({ onLockSessio
                       Expiry Redirect URL (WhatsApp / Payment Link)
                     </label>
                     <input
-                      type="url"
-                      placeholder="e.g. https://wa.me/919999999999?text=Please%20renew"
+                      type="text"
+                      placeholder="e.g. https://wa.me/919999999999?text=Please%20renew or whatsapp://send?phone=919999999999"
                       value={formData.redirectUrl}
                       onChange={(e) => setFormData({ ...formData, redirectUrl: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                      className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-xs"
                     />
-                    <p className="text-[10px] text-gray-400 mt-1">When expired, the client app will redirect directly to this link.</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Directly opens WhatsApp on Android (no web page preview) or redirects to any custom payment URL.</p>
                   </div>
 
                   {/* Lock Screen Message */}
