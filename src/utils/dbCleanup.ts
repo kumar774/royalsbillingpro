@@ -97,3 +97,43 @@ export const cleanupRestaurantFields = async (): Promise<number> => {
     throw error;
   }
 };
+
+export const deleteRestaurantWithAllData = async (restaurantId: string) => {
+  try {
+    // 1. Saari related collections jahan restaurantId use hota hai
+    const subcollectionsList = ['menu', 'orders', 'expenses', 'staff', 'customers', 'categories', 'config'];
+
+    for (const colName of subcollectionsList) {
+      const colRef = collection(db, 'restaurants', restaurantId, colName);
+      const snapshot = await getDocs(colRef);
+      if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    }
+
+    // 2. Agar top-level collections me bhi restaurantId se data save hota hai toh unhe bhi clean karein
+    const topLevelCols = ['orders', 'expenses', 'menuItems'];
+    for (const colName of topLevelCols) {
+      const q = query(collection(db, colName), where('restaurantId', '==', restaurantId));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    }
+
+    // 3. Last me main restaurant document ko delete karein
+    await deleteDoc(doc(db, 'restaurants', restaurantId));
+    return { success: true };
+  } catch (error) {
+    console.error("Error deleting restaurant and its data:", error);
+    throw error;
+  }
+};
