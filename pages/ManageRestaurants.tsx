@@ -1,21 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { collection, addDoc, doc, setDoc, getDoc, updateDoc, getDocs } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { Building2, Save, Loader2, Image as ImageIcon, Share2, Trash2 } from 'lucide-react';
+import { Building2, Save, Loader2, Image as ImageIcon, Share2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Restaurant, SocialLinks } from '../types';
 import { toast } from 'react-hot-toast';
-import { deleteRestaurantWithAllData } from '../src/utils/dbCleanup';
 
 const ManageRestaurants: React.FC = () => {
   const navigate = useNavigate();
   const { restaurantId, editId } = useParams<{ restaurantId: string; editId?: string }>();
   
   const [loading, setLoading] = useState(false);
-  const [restaurantsList, setRestaurantsList] = useState<any[]>([]);
-  const [isFetchingList, setIsFetchingList] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
   const [formData, setFormData] = useState({
     name: '',
     cuisine: '', 
@@ -30,24 +25,7 @@ const ManageRestaurants: React.FC = () => {
     } as SocialLinks
   });
 
-  const fetchRestaurants = async () => {
-    try {
-      setIsFetchingList(true);
-      const querySnapshot = await getDocs(collection(db, 'restaurants'));
-      const list = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setRestaurantsList(list);
-    } catch (error) {
-      console.error("Error fetching restaurants list:", error);
-    } finally {
-      setIsFetchingList(false);
-    }
-  };
-
   useEffect(() => {
-    fetchRestaurants();
     if (editId) {
         const fetchRestaurant = async () => {
             const docRef = doc(db, 'restaurants', editId);
@@ -55,6 +33,7 @@ const ManageRestaurants: React.FC = () => {
             if (docSnap.exists()) {
                 const data = docSnap.data() as Restaurant;
                 
+                // Fetch config for social media
                 let socialLinks = { instagram: '', facebook: '', twitter: '' };
                 try {
                     const configRef = doc(db, 'restaurants', editId, 'config', 'main');
@@ -71,7 +50,7 @@ const ManageRestaurants: React.FC = () => {
 
                 setFormData({
                     name: data.name,
-                    cuisine: data.cuisine ? data.cuisine.join(', ') : '',
+                    cuisine: data.cuisine.join(', '),
                     location: data.location,
                     logo: data.logo,
                     bannerImage: data.bannerImage,
@@ -83,26 +62,6 @@ const ManageRestaurants: React.FC = () => {
         fetchRestaurant();
     }
   }, [editId]);
-
-  const handleDeleteRestaurant = async (id: string, name: string) => {
-    const confirmDelete = window.confirm(
-      `Kya aap "${name}" restaurant aur usse juda SARA data (Orders, Menu, Staff, Expenses) hamesha ke liye delete karna chahte hain?`
-    );
-    if (!confirmDelete) return;
-
-    const toastId = toast.loading("Deleting restaurant and all associated data...");
-    try {
-      setDeletingId(id);
-      await deleteRestaurantWithAllData(id);
-      toast.success(`"${name}" successfully deleted!`, { id: toastId });
-      setRestaurantsList(prev => prev.filter(r => r.id !== id));
-    } catch (error) {
-      console.error("Delete failed:", error);
-      toast.error("Failed to delete restaurant.", { id: toastId });
-    } finally {
-      setDeletingId(null);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,12 +95,14 @@ const ManageRestaurants: React.FC = () => {
         await setDoc(doc(db, 'restaurants', targetId), { ...restaurantData, id: targetId, menu: [] }, {merge: true});
       }
 
+      // Save to config/main
       if (targetId) {
           const configRef = doc(db, 'restaurants', targetId, 'config', 'main');
           const configUpdate: Record<string, unknown> = {
               socialLinks: formData.socialLinks
           };
           
+          // If new restaurant, initialize order numbering
           if (!editId) {
               configUpdate.nextOrderNumber = 1;
               configUpdate.orderIdPrefix = 'ORD-';
@@ -172,47 +133,13 @@ const ManageRestaurants: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto pb-10">
-      <div className="mb-8 flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">{editId ? 'Edit Restaurant Profile' : 'Add New Restaurant'}</h2>
-          <p className="text-gray-500">{editId ? 'Update existing restaurant details.' : 'Create a new restaurant profile to manage.'}</p>
-        </div>
+      <div className="mb-8">
+        <h2 className="text-2xl font-bold text-gray-900">{editId ? 'Edit Restaurant Profile' : 'Add New Restaurant'}</h2>
+        <p className="text-gray-500">{editId ? 'Update existing restaurant details.' : 'Create a new restaurant profile to manage.'}</p>
       </div>
 
-      {/* Existing Restaurants List with Delete Option */}
-      {!editId && restaurantsList.length > 0 && (
-        <div className="mb-10 bg-white rounded-xl shadow-sm border border-gray-150 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Existing Restaurants</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {restaurantsList.map((res) => (
-              <div key={res.id} className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
-                <div>
-                  <h4 className="font-bold text-sm text-gray-800">{res.name}</h4>
-                  <span className="text-xs text-gray-500">{res.location}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => navigate(`/dashboard/${restaurantId}/restaurants/edit/${res.id}`)}
-                    className="px-2.5 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteRestaurant(res.id, res.name)}
-                    disabled={deletingId === res.id}
-                    className="p-1.5 text-red-600 bg-red-50 rounded hover:bg-red-100 disabled:opacity-50"
-                    title="Delete Restaurant & All Data"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Basic Details */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
           <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
              <Building2 className="h-5 w-5 mr-2 text-orange-500" /> Basic Details
@@ -259,6 +186,7 @@ const ManageRestaurants: React.FC = () => {
               />
             </div>
 
+            {/* Is Active Status Switch */}
             <div className="flex items-center pt-6">
               <label className="flex items-center cursor-pointer">
                 <input 
@@ -274,6 +202,7 @@ const ManageRestaurants: React.FC = () => {
           </div>
         </div>
 
+        {/* Branding & Image Previews */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
            <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
              <ImageIcon className="h-5 w-5 mr-2 text-orange-500" /> Branding & Previews
@@ -331,6 +260,7 @@ const ManageRestaurants: React.FC = () => {
            </div>
         </div>
 
+        {/* Social Media Links */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-150 p-6 space-y-6">
            <h3 className="text-lg font-semibold text-gray-900 pb-2 border-b border-gray-100 flex items-center">
              <Share2 className="h-5 w-5 mr-2 text-orange-500" /> Menu Page Social Links
