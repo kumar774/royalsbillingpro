@@ -5,6 +5,7 @@ import { Edit, Plus, Loader2, ExternalLink, AlertTriangle, Settings } from 'luci
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { toast } from 'react-hot-toast';
+import { deleteRestaurantWithAllData } from '../src/utils/dbCleanup';
 
 const RestaurantList: React.FC = () => {
   const { restaurants, loading } = useRestaurants();
@@ -30,7 +31,27 @@ const RestaurantList: React.FC = () => {
       setUpdatingStatus(null);
     }
   };
+const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const handleDelete = async (id: string, name: string) => {
+    const confirmDelete = window.confirm(
+      `Kya aap "${name}" restaurant aur usse juda SARA data (Orders, Menu, Staff, Expenses) hamesha ke liye delete karna chahte hain?`
+    );
+    if (!confirmDelete) return;
+
+    try {
+      setDeletingId(id);
+      await deleteRestaurantWithAllData(id);
+      alert(`"${name}" aur uska sara data successfully delete kar diya gaya hai.`);
+      window.location.reload(); // List refresh karne ke liye
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Restaurant delete karne me error aaya.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+  
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-orange-600" /></div>;
 
   return (
@@ -125,6 +146,18 @@ const RestaurantList: React.FC = () => {
                         >
                           <Edit className="h-4 w-4" />
                         </button>
+                        <button
+  type="button"
+  onClick={(e) => {
+    e.stopPropagation();
+    handleDelete(restaurant.id, restaurant.name);
+  }}
+  disabled={deletingId === restaurant.id}
+  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors ml-2 disabled:opacity-50"
+  title="Delete Restaurant & All Data"
+>
+  <Trash2 size={16} />
+</button>
                       </div>
                    </td>
                  </tr>
