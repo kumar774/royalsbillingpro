@@ -5,7 +5,7 @@ import { Building2, Save, Loader2, Image as ImageIcon, Share2 } from 'lucide-rea
 import { useNavigate, useParams } from 'react-router-dom';
 import { Restaurant, SocialLinks } from '../types';
 import { toast } from 'react-hot-toast';
-
+import { deleteRestaurantWithAllData } from '../src/utils/dbCleanup';
 const ManageRestaurants: React.FC = () => {
   const navigate = useNavigate();
   const { restaurantId, editId } = useParams<{ restaurantId: string; editId?: string }>();
@@ -131,11 +131,55 @@ const ManageRestaurants: React.FC = () => {
     ? formData.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
     : 'your-restaurant-name';
 
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+const handleDelete = async (restaurantId: string, restaurantName: string) => {
+  const confirmDelete = window.confirm(
+    `Kya aap "${restaurantName}" restaurant aur usse जुड़ा SARA data (Orders, Menu, Staff, Expenses) hamesha ke liye delete karna chahte hain?`
+  );
+  if (!confirmDelete) return;
+
+  try {
+    setDeletingId(restaurantId);
+    await deleteRestaurantWithAllData(restaurantId);
+    alert(`"${restaurantName}" aur uska sara data successfully delete kar diya gaya hai.`);
+    // Agar aapke component me local state hai jo restaurants list ko hold karti hai, toh use update karein:
+    // setRestaurants(prev => prev.filter(r => r.id !== restaurantId));
+    window.location.reload(); // Page refresh karke list update karne ke liye
+  } catch (error) {
+    console.error("Delete failed:", error);
+    alert("Restaurant delete karne me koi error aaya hai.");
+  } finally {
+    setDeletingId(null);
+  }
+};
+
   return (
     <div className="max-w-4xl mx-auto pb-10">
       <div className="mb-8">
         <h2 className="text-2xl font-bold text-gray-900">{editId ? 'Edit Restaurant Profile' : 'Add New Restaurant'}</h2>
+        
         <p className="text-gray-500">{editId ? 'Update existing restaurant details.' : 'Create a new restaurant profile to manage.'}</p>
+        <button
+    type="button"
+    onClick={(e) => {
+      e.stopPropagation();
+      handleDelete(restaurant.id, restaurant.name);
+    }}
+    disabled={deletingId === restaurant.id}
+    title="Delete Restaurant & All Data"
+    style={{
+      background: '#fee2e2',
+      color: '#dc2626',
+      border: 'none',
+      padding: '6px 10px',
+      borderRadius: '6px',
+      cursor: 'pointer',
+      marginLeft: '8px'
+    }}
+  >
+    {deletingId === restaurant.id ? 'Deleting...' : '🗑️ Delete'}
+  </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
