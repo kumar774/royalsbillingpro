@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, updateDoc, doc, query, deleteDoc, getDoc, where, getDocs, getDocsFromCache } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Order, OrderStatus, Restaurant, RolePermissions } from '../types';
-import { Trash2, AlertTriangle, Globe, Monitor, Printer, Download, User, Loader2, Plus } from 'lucide-react';
+import { Trash2, AlertTriangle, Globe, Monitor, Printer, Download, User, Loader2, Plus, MessageSquare } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { generateProfessionalReceipt } from '../components/ReceiptPDF';
 import { sendTelegramMessage, escapeHtml } from '../services/telegramService';
@@ -91,14 +91,12 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
 
       const now = new Date();
 
-      // Start of current week (Monday)
       const startOfWeek = new Date(now);
       const day = startOfWeek.getDay();
       const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
       startOfWeek.setDate(diff);
       startOfWeek.setHours(0, 0, 0, 0);
 
-      // Start of current month (1st of month)
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
 
       querySnapshot.forEach((docSnap) => {
@@ -169,7 +167,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         mergedMap.set(id, order);
       }
     });
-    // Live orders override historical entries with latest live values
     liveOrdersRef.current.forEach((order, id) => {
       if (!deletedOrderIdsRef.current.has(id)) {
         mergedMap.set(id, order);
@@ -186,14 +183,11 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
 
     const ordersRef = collection(db, 'restaurants', restaurantId, 'orders');
 
-    // 1. Live Snapshot Query: Listen to last 48 hours so today's orders & yesterday evening's orders
-    // always receive instant real-time sync on mobile without missing timezone offsets
     const twoDaysAgo = new Date();
     twoDaysAgo.setHours(0, 0, 0, 0);
     twoDaysAgo.setDate(twoDaysAgo.getDate() - 1);
     const liveQuery = query(ordersRef, where('createdAt', '>=', twoDaysAgo.toISOString()));
 
-    // Attach real-time listener for recent orders
     const unsubscribeLive = onSnapshot(liveQuery, (snapshot) => {
       const newLiveMap = new Map<string, Order>();
       snapshot.docs.forEach((doc) => {
@@ -202,7 +196,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
             id: doc.id,
             ...doc.data()
           } as Order);
-          // Also keep historyOrdersRef in sync so it never has a stale version
           if (historyOrdersRef.current.has(doc.id)) {
             historyOrdersRef.current.set(doc.id, {
               id: doc.id,
@@ -211,7 +204,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           }
         }
       });
-      // Any order that was in liveOrdersRef but is now absent from snapshot was deleted from Firestore
       liveOrdersRef.current.forEach((_, id) => {
         if (!newLiveMap.has(id)) {
           historyOrdersRef.current.delete(id);
@@ -222,12 +214,10 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       syncOrdersToState();
     });
 
-    // 2. Historical Fetch Query: Fetch older orders (one-time) using client-side cache first to save read costs
     const fetchHistory = async () => {
       try {
         let historyQuery;
         if (startDate || endDate) {
-          // If custom range selected, query only that range
           let conditions = [];
           if (startDate) {
             const start = new Date(startDate);
@@ -241,31 +231,21 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           }
           historyQuery = query(ordersRef, ...conditions);
         } else {
-          // By default load ALL orders from local browser cache first
           historyQuery = query(ordersRef);
         }
 
         let snapshot;
         try {
-          // Attempt cache-first fetch (0 reads cost on Firebase billing)
           snapshot = await getDocsFromCache(historyQuery);
-          console.log(`[FIREBASE CACHE] Loaded ${snapshot.size} history orders from browser cache.`);
-          
-          // If cache is empty, fall back to server fetch to warm up cache
           if (snapshot.empty) {
             snapshot = await getDocs(historyQuery);
-            console.log(`[FIREBASE SERVER] Cache was empty. Loaded ${snapshot.size} history orders from server.`);
           }
         } catch {
-          // Fallback to server if cache fetch throws error
           snapshot = await getDocs(historyQuery);
-          console.log(`[FIREBASE SERVER] Cache query failed. Loaded ${snapshot.size} history orders from server.`);
         }
 
         snapshot.docs.forEach(doc => {
-          // Never re-add deleted orders
           if (deletedOrderIdsRef.current.has(doc.id)) return;
-          // Never overwrite live/fresh orders with stale cached copies!
           if (liveOrdersRef.current.has(doc.id)) return;
 
           historyOrdersRef.current.set(doc.id, {
@@ -294,7 +274,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     if (!restaurantId) return;
     if (deletedOrderIdsRef.current.has(orderId)) return;
 
-    // 1. Instant optimistic state update for 0ms UI response on mobile
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
     if (liveOrdersRef.current.has(orderId)) {
       liveOrdersRef.current.set(orderId, { ...liveOrdersRef.current.get(orderId)!, status: newStatus });
@@ -308,7 +287,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', orderId);
       await updateDoc(orderRef, { status: newStatus });
 
-      // Send Telegram Notification
       if (restaurantData?.notificationSettings?.orderStatusUpdate && 
           restaurantData?.notificationSettings?.telegramToken && 
           restaurantData?.notificationSettings?.telegramChatId) {
@@ -334,8 +312,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     }
   };
 
-
-
   const confirmDelete = (orderId: string) => {
       setOrderToDelete(orderId);
       setShowDeleteModal(true);
@@ -355,7 +331,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       const targetId = orderToCancel;
       if (deletedOrderIdsRef.current.has(targetId)) return;
 
-      // 1. Instant optimistic cancel
       setOrders(prev => prev.map(o => o.id === targetId ? { ...o, status: 'Cancelled' } : o));
       if (liveOrdersRef.current.has(targetId)) {
         liveOrdersRef.current.set(targetId, { ...liveOrdersRef.current.get(targetId)!, status: 'Cancelled' });
@@ -371,7 +346,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           const orderRef = doc(db, 'restaurants', restaurantId, 'orders', targetId);
           await updateDoc(orderRef, { status: 'Cancelled' });
 
-          // Send Telegram Notification
           if (restaurantData?.notificationSettings?.orderStatusUpdate && 
               restaurantData?.notificationSettings?.telegramToken && 
               restaurantData?.notificationSettings?.telegramChatId) {
@@ -406,14 +380,9 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       const targetId = orderToDelete;
       const order = orders.find(o => o.id === targetId);
 
-      // 1. Permanently register this ID in deletedOrderIdsRef
       deletedOrderIdsRef.current.add(targetId);
-
-      // 2. Remove from both in-memory cache maps
       liveOrdersRef.current.delete(targetId);
       historyOrdersRef.current.delete(targetId);
-
-      // 3. Instant optimistic removal from UI state
       setOrders(prev => prev.filter(o => o.id !== targetId));
 
       setShowDeleteModal(false);
@@ -424,7 +393,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           await deleteDoc(doc(db, 'restaurants', restaurantId, 'orders', targetId));
           toast.success("Order deleted successfully", { id: toastId });
 
-          // Send Telegram Notification for Deletion
           if (order && 
               restaurantData?.notificationSettings?.telegramToken && 
               restaurantData?.notificationSettings?.telegramChatId) {
@@ -444,10 +412,45 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
           console.error("Failed to delete order:", err);
           const message = err instanceof Error ? err.message : "Unknown error";
           toast.error("Failed to delete order: " + message, { id: toastId });
-          // If server call truly failed, allow it back
           deletedOrderIdsRef.current.delete(targetId);
           syncOrdersToState();
       }
+  };
+
+  // WhatsApp Bill Send Handler (For any order anytime)
+  const handleSendWhatsAppBill = (order: Order) => {
+    const phone = order.customerPhone || '';
+    if (!phone || phone === 'N/A') {
+      toast.error("No customer phone number available for this order!");
+      return;
+    }
+
+    const subtotal = order.subtotal || order.items.reduce((sum, item) => sum + ((item.selectedVariant?.price ?? item.price) * item.quantity), 0);
+    const gstAmount = order.taxDetails?.gstAmount || 0;
+    const serviceAmount = order.taxDetails?.serviceAmount || 0;
+    const grandTotal = order.total;
+    const orderId = order.formattedId || order.id.slice(0, 6);
+
+    let message = `Hi ${order.customerName || 'Guest'}, here is your bill details from *${restaurantData?.name || 'Restaurant'}*:\n\n`;
+    message += `Order ID: #${orderId}\n\n`;
+    message += `Items:\n`;
+    order.items.forEach(item => {
+      message += `- ${item.quantity}x ${item.name}${item.selectedVariant ? ` (${item.selectedVariant.size})` : ''} (₹${((item.selectedVariant?.price ?? item.price) * item.quantity).toFixed(2)})\n`;
+    });
+    message += `\nSubtotal: ₹${subtotal.toFixed(2)}\n`;
+    if (gstAmount > 0) {
+      message += `GST: ₹${gstAmount.toFixed(2)}\n`;
+    }
+    if (serviceAmount > 0) {
+      message += `Service Charge: ₹${serviceAmount.toFixed(2)}\n`;
+    }
+    message += `Grand Total: ₹${grandTotal.toFixed(2)}\n`;
+    message += `Payment Status: *${order.paymentStatus || 'Pending'}*\n\n`;
+    message += `Thank you for ordering with us! 🙏`;
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    const whatsappUrl = `https://wa.me/${cleanPhone.startsWith('91') ? cleanPhone : '91' + cleanPhone}?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
   };
 
   const filteredOrders = orders.filter(o => {
@@ -492,10 +495,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     }
   };
 
-
-
-
-
    const handleMarkAsPaid = async (order: Order) => {
     if (permissions && !permissions.orders.edit) {
       toast.error("You do not have permission to edit orders.");
@@ -504,7 +503,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
     if (!restaurantId) return;
     if (deletedOrderIdsRef.current.has(order.id)) return;
 
-    // Instant optimistic update
     setOrders(prev => prev.map(o => o.id === order.id ? { ...o, paymentStatus: 'Paid' } : o));
     if (liveOrdersRef.current.has(order.id)) {
       liveOrdersRef.current.set(order.id, { ...liveOrdersRef.current.get(order.id)!, paymentStatus: 'Paid' });
@@ -518,7 +516,6 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
       const orderRef = doc(db, 'restaurants', restaurantId, 'orders', order.id);
       await updateDoc(orderRef, { paymentStatus: 'Paid' });
       
-      // Send Telegram Notification
       if (restaurantData?.notificationSettings?.paymentStatusUpdate && 
           restaurantData?.notificationSettings?.telegramToken && 
           restaurantData?.notificationSettings?.telegramChatId) {
@@ -534,30 +531,8 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
         ).catch(err => console.error("Telegram notification failed:", err));
       }
 
-      // WhatsApp Logic
       if (order.customerPhone && order.customerPhone !== 'N/A') {
-          const subtotal = order.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-          const gstAmount = order.taxDetails?.gstAmount || 0;
-          const serviceAmount = order.taxDetails?.serviceAmount || 0;
-          const grandTotal = order.total;
-
-          let message = `Hi ${order.customerName || 'Guest'}, thank you for your order!\n\n`;
-          message += `Order ID: ${order.formattedId || order.id.slice(0, 6)}\n\n`;
-          message += `Items:\n`;
-          order.items.forEach(item => {
-              message += `- ${item.quantity}x ${item.name}${item.selectedVariant ? ` (${item.selectedVariant.size})` : ''} (₹${((item.selectedVariant?.price || item.price) * item.quantity).toFixed(2)})\n`;
-          });
-          message += `\nSubtotal: ₹${subtotal.toFixed(2)}\n`;
-          if (gstAmount > 0) {
-            message += `GST (5%): ₹${gstAmount.toFixed(2)}\n`;
-          }
-          if (serviceAmount > 0) {
-            message += `Service Charge: ₹${serviceAmount.toFixed(2)}\n`;
-          }
-          message += `Grand Total: ₹${grandTotal.toFixed(2)}\n\n`;
-          message += `Your payment of ₹${grandTotal.toFixed(2)} has been received. We hope you enjoy your meal!`;
-          const whatsappUrl = `https://wa.me/${order.customerPhone.replace(/\D/g,'')}?text=${encodeURIComponent(message)}`;
-          window.open(whatsappUrl, '_blank');
+          handleSendWhatsAppBill(order);
       }
       
       toast.success("Payment marked as Paid");
@@ -823,6 +798,15 @@ const Orders: React.FC<OrdersProps> = ({ permissions }) => {
                         Mark as Paid
                       </button>
                     )}
+                    
+                    {/* Send WhatsApp Bill Button */}
+                    <button 
+                      onClick={() => handleSendWhatsAppBill(order)} 
+                      className="w-full py-2.5 text-sm font-bold rounded-xl bg-green-600 text-white hover:bg-green-700 transition flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <MessageSquare className="h-4 w-4" /> Send Bill via WhatsApp
+                    </button>
+
                     <button onClick={() => printReceipt(order)} className="w-full py-2.5 text-sm font-bold rounded-xl bg-gray-100 text-gray-600 hover:bg-gray-200 transition flex items-center justify-center gap-2">
                       <Printer className="h-5 w-5" /> Print Bill
                     </button>
