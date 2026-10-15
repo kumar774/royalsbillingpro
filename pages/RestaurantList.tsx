@@ -1,22 +1,17 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useRestaurants } from '../context/RestaurantContext';
-import { Edit, Plus, Loader2, ExternalLink, AlertTriangle, Settings } from 'lucide-react';
-import { doc, updateDoc } from 'firebase/firestore';
+import { Edit, Plus, Loader2, ExternalLink, AlertTriangle, Settings, Trash2 } from 'lucide-react';
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { toast } from 'react-hot-toast';
-import { deleteRestaurantWithAllData } from '../src/utils/dbCleanup';
 
 const RestaurantList: React.FC = () => {
   const { restaurants, loading } = useRestaurants();
   const navigate = useNavigate();
   const { restaurantId } = useParams<{ restaurantId: string }>();
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
-
-
-
-
-
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleStatusChange = async (id: string, currentStatus: boolean | undefined) => {
     setUpdatingStatus(id);
@@ -31,27 +26,25 @@ const RestaurantList: React.FC = () => {
       setUpdatingStatus(null);
     }
   };
-const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleDelete = async (id: string, name: string) => {
-    const confirmDelete = window.confirm(
-      `Kya aap "${name}" restaurant aur usse juda SARA data (Orders, Menu, Staff, Expenses) hamesha ke liye delete karna chahte hain?`
-    );
+    const confirmDelete = window.confirm(`Kya aap "${name}" restaurant ko delete karna chahte hain?`);
     if (!confirmDelete) return;
 
+    const toastId = toast.loading("Deleting restaurant...");
     try {
       setDeletingId(id);
-      await deleteRestaurantWithAllData(id);
-      alert(`"${name}" aur uska sara data successfully delete kar diya gaya hai.`);
-      window.location.reload(); // List refresh karne ke liye
-    } catch (error) {
-      console.error("Delete failed:", error);
-      alert("Restaurant delete karne me error aaya.");
+      await deleteDoc(doc(db, 'restaurants', id));
+      toast.success(`"${name}" successfully delete ho gaya!`, { id: toastId });
+      window.location.reload();
+    } catch (err) {
+      console.error("Delete error:", err);
+      toast.error("Failed to delete restaurant: " + (err as Error).message, { id: toastId });
     } finally {
       setDeletingId(null);
     }
   };
-  
+
   if (loading) return <div className="p-8 flex justify-center"><Loader2 className="animate-spin h-8 w-8 text-orange-600" /></div>;
 
   return (
@@ -146,18 +139,20 @@ const [deletingId, setDeletingId] = useState<string | null>(null);
                         >
                           <Edit className="h-4 w-4" />
                         </button>
+
+                        {/* Delete Button */}
                         <button
-  type="button"
-  onClick={(e) => {
-    e.stopPropagation();
-    handleDelete(restaurant.id, restaurant.name);
-  }}
-  disabled={deletingId === restaurant.id}
-  className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors ml-2 disabled:opacity-50"
-  title="Delete Restaurant & All Data"
->
-  <Trash2 size={16} />
-</button>
+                          onClick={() => handleDelete(r.id, r.name)}
+                          disabled={deletingId === r.id}
+                          className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                          title="Delete Restaurant"
+                        >
+                          {deletingId === r.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
                       </div>
                    </td>
                  </tr>
@@ -172,7 +167,7 @@ const [deletingId, setDeletingId] = useState<string | null>(null);
                        </td>
                    </tr>
                )}
-             </tbody>
+              </tbody>
            </table>
         </div>
       </div>
